@@ -19,6 +19,7 @@ type State = {
   images: Record<string, Img>;
   busy: boolean;
   asking: string; // the question being answered, shown until the first block arrives
+  question: string; // the same question, kept for the whole turn
   attached: string; // the picture sent with this question, shown where the model places it
   seen: string; // the question as the model received it, including what it saw in the picture
   turnOps: Op[]; // everything the model wrote this turn, for history
@@ -34,7 +35,7 @@ type State = {
 /** A finished page, kept so the reader can leaf back to it. */
 type Page = { head: Head; blocks: Op[]; images: Record<string, Img>; history: Turn[] };
 
-const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "", thread: "", pages: [], at: -1, rev: 0 };
+const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", question: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "", thread: "", pages: [], at: -1, rev: 0 };
 
 type Action = { type: "start"; input: string; image?: string; thread: string } | { type: "open"; thread: string; pages: Page[]; to: number } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "go"; to: number };
 
@@ -50,8 +51,14 @@ function reducer(s: State, a: Action): State {
 
     case "open": {
       // A conversation from the history replaces the one that was showing.
-      const kept = { ...initial, thread: a.thread, pages: a.pages, rev: s.rev };
-      const page = a.pages[a.to];
+      // A page saved while its pictures were still being made will not get them now.
+      const pages = a.pages.map((p) => {
+        const images = { ...p.images };
+        for (const [id, img] of Object.entries(images)) if (img.pending) images[id] = { ...img, pending: false, failed: true };
+        return { ...p, images };
+      });
+      const kept = { ...initial, thread: a.thread, pages, rev: s.rev };
+      const page = pages[a.to];
       if (!page) return kept;
       return { ...kept, at: a.to, head: page.head, blocks: page.blocks, images: page.images, history: page.history };
     }
@@ -59,7 +66,7 @@ function reducer(s: State, a: Action): State {
     case "start":
       // Asking from the cover begins a new conversation.
       if (a.thread !== s.thread) s = { ...s, thread: a.thread, pages: [], at: -1 };
-      return { ...s, busy: true, asking: a.input, attached: a.image ?? "", seen: "", error: "", timing: {}, turnOps: [], stale: new Set(s.blocks.map((b) => b.id)) };
+      return { ...s, busy: true, asking: a.input, question: a.input, attached: a.image ?? "", seen: "", error: "", timing: {}, turnOps: [], stale: new Set(s.blocks.map((b) => b.id)) };
 
     case "finish": {
       // Whatever is still pending when the stream ends will never arrive.
@@ -197,7 +204,7 @@ export function App() {
     pending.current = false;
   }
   function show(to: number) {
-    abort.current?.abort();
+    cancel();
     enter({ th: state.current.thread, i: to });
     dispatch({ type: "go", to });
     window.scrollTo({ top: 0 });
@@ -216,7 +223,7 @@ export function App() {
     if (!MOCK) restore(history.state);
     const onPop = (e: PopStateEvent) => {
       if (skipPop.current) return void (skipPop.current = false);
-      abort.current?.abort();
+      cancel();
       pending.current = false;
       restore(e.state);
       window.scrollTo({ top: 0 });
@@ -225,18 +232,41 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // Pages are saved on the server after each one is made.
-  useEffect(() => {
-    if (MOCK || !s.rev || !s.thread || !s.pages.length) return;
-    const first = s.pages[0];
+  // The conversation is saved on the server as soon as a page has a title,
+  // again when its text is complete and as each picture arrives, so it is in
+  // the history even if the reader leaves before the page is finished.
+  const saving = useRef<Promise<unknown>>(Promise.resolve()); // saves go out one at a time, in order
+  const unfinished = useRef(""); // the conversation whose saved copy includes an unfinished page
+  function save(id: string, pages: Page[]) {
+    const first = pages[0];
     const title = first.head.title || clip(first.history[first.history.length - 1]?.user ?? "", 40);
     const img = Object.values(first.images).find((im) => im.url?.startsWith("/api/img/"))?.url;
-    const id = s.thread;
-    api.saveThread(id, { title, bg: first.head.bg, img }, s.pages).then(
-      () => setRecent({ id, title, updated: new Date().toISOString(), count: s.pages.length }),
-      () => toast(T.notSaved),
-    );
+    saving.current = saving.current
+      .then(() => api.saveThread(id, { title, bg: first.head.bg, img }, pages))
+      .then(() => setRecent({ id, title, updated: new Date().toISOString(), count: pages.length }), () => toast(T.notSaved));
+  }
+  const settled = Object.values(s.images).filter((im) => !im.pending).length;
+  useEffect(() => {
+    if (MOCK || !s.busy || !s.thread || !s.head || !s.turnOps.length) return;
+    unfinished.current = s.thread;
+    const page: Page = { head: s.head, blocks: s.blocks.filter((b) => !s.stale.has(b.id)), images: s.images, history: [...s.history, { user: s.seen || s.question, ops: forHistory(s.turnOps) }].slice(-3) };
+    save(s.thread, [...s.pages.slice(0, s.at + 1), page]);
+  }, [s.busy, s.turnOps.length > 0, s.timing.scene, settled]);
+  useEffect(() => {
+    if (MOCK || !s.rev || !s.thread || !s.pages.length) return;
+    unfinished.current = "";
+    save(s.thread, s.pages);
   }, [s.rev]);
+  /** Stops the page being made. Its saved draft gives way to the pages that were finished. */
+  function cancel() {
+    abort.current?.abort();
+    const cur = state.current;
+    if (cur.busy && unfinished.current === cur.thread) {
+      if (cur.pages.length) save(cur.thread, cur.pages);
+      else saving.current = saving.current.then(() => api.deleteThread(cur.thread)).then(latest, () => {});
+    }
+    unfinished.current = "";
+  }
 
   function toast(text: string, undo?: () => void) {
     const id = Date.now() + Math.random();
@@ -311,7 +341,7 @@ export function App() {
     try {
       const t = await api.thread(id);
       const to = t.pages.length - 1;
-      abort.current?.abort();
+      cancel();
       enter({ th: t.id, i: to });
       dispatch({ type: "open", thread: t.id, pages: t.pages, to });
       window.scrollTo({ top: 0 });
@@ -497,6 +527,7 @@ export function App() {
             onDeleted={(id) => {
               latest();
               if (id !== state.current.thread) return;
+              unfinished.current = "";
               abort.current?.abort();
               enter({ i: -1 });
               dispatch({ type: "open", thread: "", pages: [], to: -1 });
