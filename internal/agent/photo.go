@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"atelier/internal/ark"
 	"atelier/internal/profile"
 )
 
@@ -204,7 +205,11 @@ func (a *Agent) HandleInspect(w http.ResponseWriter, r *http.Request) {
 	people, err := a.findPeople(ctx, jpg)
 	if err != nil {
 		log.Printf("inspect: %v", err)
-		fail(w, http.StatusBadGateway, "没能看清这张图，请再试一次。")
+		msg := ark.Hint(err)
+		if msg == "" {
+			msg = "没能看清这张图，请再试一次。"
+		}
+		fail(w, http.StatusBadGateway, msg)
 		return
 	}
 	guess, confidence := -1, 0.0
@@ -362,4 +367,48 @@ func clipRunes(s string, n int) string {
 		return string(rs[:n])
 	}
 	return s
+}
+
+// Setup reports what stops the app from working with the configured key and
+// models, in words for the person who started it. An empty list means ready.
+func (a *Agent) Setup(ctx context.Context) []string {
+	checks := []struct {
+		model string
+		run   func(context.Context, string) error
+	}{
+		{a.TextModel, a.Ark.CheckChat},
+		{a.VisionModel, a.Ark.CheckChat},
+		{a.ImageModel, a.Ark.CheckImage},
+	}
+	problems := make([]string, len(checks))
+	var wg sync.WaitGroup
+	for i, c := range checks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			if err := c.run(cctx, c.model); err != nil {
+				log.Printf("setup check %s: %v", c.model, err)
+				if problems[i] = ark.Hint(err); problems[i] == "" {
+					problems[i] = fmt.Sprintf("连不上模型 %s，请检查网络。", c.model)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	out := []string{}
+	for _, p := range problems {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// HandleSetup lets the page tell a first-time user what is missing.
+func (a *Agent) HandleSetup(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"problems": a.Setup(r.Context())})
 }

@@ -20,6 +20,7 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<T>
 }
 
 export const api = {
+  setup: () => call<{ problems: string[] }>("/api/setup"),
   profile: () => call<Profile>("/api/profile"),
   clear: () => call<Profile>("/api/profile", "DELETE"),
   inspect: (image: string) => call<Inspection>("/api/photo/inspect", "POST", { image }),

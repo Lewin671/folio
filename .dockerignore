@@ -1,0 +1,8 @@
+.git
+.env
+data
+dist-bin
+atelier
+web/node_modules
+web/dist
+*.log

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -25,10 +26,8 @@ func env(key, fallback string) string {
 }
 
 func main() {
+	// Without a key the server still starts, so the page can say what is missing.
 	key := os.Getenv("ARK_API_KEY")
-	if key == "" {
-		log.Fatal("ARK_API_KEY is not set")
-	}
 	// Photos and preferences stay on this machine, readable only by this account.
 	store, err := profile.Open(env("DATA_DIR", "data"))
 	if err != nil {
@@ -56,10 +55,20 @@ func main() {
 	mux.HandleFunc("DELETE /api/photo/{id}", a.HandleDeletePhoto)
 	mux.HandleFunc("POST /api/photo/{id}/main", a.HandleMainPhoto)
 	mux.HandleFunc("DELETE /api/pref/{id}", a.HandleDeletePref)
+	mux.HandleFunc("GET /api/setup", a.HandleSetup)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("/", http.FileServerFS(web))
 
 	addr := env("ADDR", "127.0.0.1:8787")
 	log.Printf("atelier listening on %s (text=%s image=%s)", addr, a.TextModel, a.ImageModel)
+	go func() {
+		if problems := a.Setup(context.Background()); len(problems) > 0 {
+			for _, p := range problems {
+				log.Printf("SETUP: %s", p)
+			}
+		} else {
+			log.Print("key and models are ready")
+		}
+	}()
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

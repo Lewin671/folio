@@ -101,6 +101,10 @@ ul, ol { list-style: none; }
 .cover-lines button:hover { padding-left: 10px; }
 .cover-lines .n { flex: none; font: 12px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.04em; color: var(--faint); translate: 0 -0.3em; }
 .is-home .brand { visibility: hidden; }
+.setup { margin-bottom: 28px; padding: 20px 22px; border-radius: 22px; background: #1b1917; color: #f6f3ee; font-size: 14px; line-height: 1.6; }
+.setup h2 { font: 900 20px/1.3 var(--serif); margin-bottom: 8px; }
+.setup li { padding: 6px 0; border-top: 1px solid rgba(246, 243, 238, 0.14); overflow-wrap: anywhere; }
+.setup p { margin-top: 8px; color: rgba(246, 243, 238, 0.6); }
 
 .asking {
   position: relative; z-index: 3; min-height: 100dvh; display: grid; place-items: center;

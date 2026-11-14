@@ -1,4 +1,4 @@
-.PHONY: web build test dev imac
+.PHONY: web build test dev darwin-amd64
 
 web:
 	cd web && pnpm install --frozen-lockfile && pnpm build
@@ -14,5 +14,5 @@ dev:
 	cd web && pnpm dev
 
 # Single binary for an Intel Mac, with the front-end embedded.
-imac: web
+darwin-amd64: web
 	GOOS=darwin GOARCH=amd64 go build -o dist-bin/atelier-darwin-amd64 .

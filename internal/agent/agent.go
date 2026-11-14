@@ -227,6 +227,9 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				log.Printf("image %s: %v", id, err)
 				out.send("image_error", map[string]any{"id": id})
+				if msg := ark.Hint(err); msg != "" {
+					out.send("error", map[string]any{"message": msg})
+				}
 				return
 			}
 			// A picture without stops still shows, on the colour the model asked for.
@@ -248,7 +251,11 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil && ctx.Err() == nil {
 		log.Printf("chat: %v", err)
-		out.send("error", map[string]any{"message": "模型暂时没有回应，请再试一次。"})
+		msg := ark.Hint(err)
+		if msg == "" {
+			msg = "模型暂时没有回应，请再试一次。"
+		}
+		out.send("error", map[string]any{"message": msg})
 	} else if nOps == 0 && ctx.Err() == nil {
 		out.send("error", map[string]any{"message": "这次没有生成出内容，请换个说法再试。"})
 	}

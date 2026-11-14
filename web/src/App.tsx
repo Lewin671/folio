@@ -114,6 +114,7 @@ export function App() {
   // The home screen is a magazine cover: one of the shipped pictures on its own backdrop.
   const [cover] = useState(() => COVERS[Math.floor(Math.random() * COVERS.length)]);
   const [profile, setProfile] = useState<Profile>(EMPTY);
+  const [problems, setProblems] = useState<string[]>([]); // what is missing in the setup, if anything
   const [panel, setPanel] = useState(false);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -141,6 +142,7 @@ export function App() {
 
   useEffect(() => {
     api.profile().then(setProfile, () => {}); // without a server (offline fixtures) the profile just stays empty
+    if (!MOCK) api.setup().then((r) => setProblems(r.problems ?? []), () => {});
   }, []);
 
   function toast(text: string, undo?: () => void) {
@@ -289,6 +291,13 @@ export function App() {
                 </ul>
               </div>
               <div className="cover-right">
+                {problems.length > 0 && (
+                  <div className="setup" role="alert">
+                    <h2>还差一步才能用</h2>
+                    <ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+                    <p>改好后重启服务，再刷新这个页面。</p>
+                  </div>
+                )}
                 <ul className="cover-lines ">
                   {SUGGESTIONS.slice(3, 6).map((q, i) => (
                     <li key={q}>
