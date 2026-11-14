@@ -5,7 +5,7 @@ import { forHistory, MOCK, runTurn } from "./stream";
 import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
 import { COVERS } from "./covers";
-import { api, EMPTY, ProfilePanel, Toasts, toJpeg, type Profile, type Toast } from "./profile";
+import { api, EMPTY, ProfilePanel, Toasts, toJpeg, type Profile, type ThreadMeta, type Toast } from "./profile";
 import { HistoryPanel } from "./history";
 
 // Shown on the cover as headlines; each leads to a different kind of page.
@@ -132,6 +132,8 @@ function applyOp(s: State, op: Op): State {
   return { ...s, turnOps, asking: "", stale, blocks: [...fresh, op, ...old], images };
 }
 
+// Timings are for whoever is tuning the models; add ?timing to the address to see them.
+const SHOW_TIMING = new URLSearchParams(location.search).has("timing");
 const newThread = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n) + "…" : text);
 
@@ -152,6 +154,7 @@ export function App() {
   const [profile, setProfile] = useState<Profile>(EMPTY);
   const [problems, setProblems] = useState<string[]>([]); // what is missing in the setup, if anything
   const [panel, setPanel] = useState<"" | "memory" | "history">("");
+  const [recent, setRecent] = useState<ThreadMeta | null>(null); // the latest conversation, offered on the cover
   const [attach, setAttach] = useState(""); // a picture waiting to be sent with the next question
   const [toasts, setToasts] = useState<Toast[]>([]);
   const picker = useRef<HTMLInputElement>(null);
@@ -179,6 +182,7 @@ export function App() {
   useEffect(() => {
     api.profile().then(setProfile, () => {}); // without a server (offline fixtures) the profile just stays empty
     if (!MOCK) api.setup().then((r) => setProblems(r.problems ?? []), () => {});
+    if (!MOCK) latest();
   }, []);
 
   // Every move is a browser history entry naming the conversation and the
@@ -225,7 +229,12 @@ export function App() {
     if (MOCK || !s.rev || !s.thread || !s.pages.length) return;
     const first = s.pages[0];
     const title = first.head.title || clip(first.history[first.history.length - 1]?.user ?? "", 40);
-    api.saveThread(s.thread, title, s.pages).catch(() => toast("这一页没能存进历史"));
+    const img = Object.values(first.images).find((im) => im.url?.startsWith("/api/img/"))?.url;
+    const id = s.thread;
+    api.saveThread(id, { title, bg: first.head.bg, img }, s.pages).then(
+      () => setRecent({ id, title, updated: new Date().toISOString(), count: s.pages.length }),
+      () => toast("这一页没能存进历史"),
+    );
   }, [s.rev]);
 
   function toast(text: string, undo?: () => void) {
@@ -294,6 +303,9 @@ export function App() {
     }
   }
 
+  const latest = () => api.threads().then((r) => setRecent(r.threads[0] ?? null), () => {});
+  const resume = () => (recent && recent.id === s.thread && s.pages.length ? show(s.pages.length - 1) : recent && openThread(recent.id));
+
   async function openThread(id: string) {
     try {
       const t = await api.thread(id);
@@ -340,23 +352,18 @@ export function App() {
           )}
         </span>
         <span className="top-right">
-          {(s.timing.first || s.busy) && (
+          {SHOW_TIMING && (s.timing.first || s.busy) && (
             <button type="button" className="timing" onClick={() => setShowTiming((v) => !v)} title="各阶段耗时，点击收起或展开">
               {showTiming ? <TimingLine t={s.timing} busy={s.busy} /> : "耗时"}
             </button>
           )}
           {MOCK && <span className="mock-flag">假数据</span>}
-          {s.at < 0 && !s.busy && s.pages.length > 0 && (
-            <button type="button" className="profile-btn" onClick={() => show(s.pages.length - 1)} aria-label="下一页">
-              回到刚才那页 →
-            </button>
-          )}
           {!MOCK && (
-            <button type="button" className="profile-btn" onClick={() => setPanel("history")}>
+            <button type="button" className="nav-link" onClick={() => setPanel("history")}>
               历史
             </button>
           )}
-          <button type="button" className="profile-btn" onClick={() => setPanel("memory")}>
+          <button type="button" className="nav-link" onClick={() => setPanel("memory")}>
             记忆
           </button>
         </span>
@@ -387,6 +394,14 @@ export function App() {
                   <p className="cover-note">问什么，都给你排一页。</p>
                 </header>
                 <ul className="cover-lines ">
+                  {recent && (
+                    <li className="resume">
+                      <button type="button" onClick={resume}>
+                        <span className="n">接着看</span>
+                        {recent.title || "上次那一页"}
+                      </button>
+                    </li>
+                  )}
                   {SUGGESTIONS.slice(0, 3).map((q, i) => (
                     <li key={q}>
                       <button type="button" onClick={() => say(q)}>
@@ -476,6 +491,7 @@ export function App() {
             onOpen={openThread}
             onClose={() => setPanel("")}
             onDeleted={(id) => {
+              latest();
               if (id !== state.current.thread) return;
               abort.current?.abort();
               enter({ i: -1 });

@@ -28,16 +28,16 @@ func TestThreadsAndPictures(t *testing.T) {
 		t.Fatal("non-picture accepted")
 	}
 	pages, _ := json.Marshal([]map[string]string{{"img": kept}})
-	if err := s.Put("abc123", "标题", pages); err != nil {
+	if err := s.Put("abc123", "标题", "#112233", kept, pages); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Put("../etc", "x", pages); err == nil {
+	if err := s.Put("../etc", "x", "", "", pages); err == nil {
 		t.Fatal("bad id accepted")
 	}
-	if err := s.Put("abc124", "x", json.RawMessage(`[]`)); err == nil {
+	if err := s.Put("abc124", "x", "", "", json.RawMessage(`[]`)); err == nil {
 		t.Fatal("empty thread accepted")
 	}
-	if l := s.List(); len(l) != 1 || l[0].Title != "标题" || l[0].Count != 1 {
+	if l := s.List(); len(l) != 1 || l[0].Title != "标题" || l[0].Count != 1 || l[0].Img != kept {
 		t.Fatalf("list = %+v", l)
 	}
 	if got, err := s.Get("abc123"); err != nil || !bytes.Equal(got.Pages, pages) {

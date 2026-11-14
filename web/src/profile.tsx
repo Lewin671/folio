@@ -7,7 +7,7 @@ export type Profile = { prefs: Pref[] };
 
 export const EMPTY: Profile = { prefs: [] };
 
-export type ThreadMeta = { id: string; title: string; updated: string; count: number };
+export type ThreadMeta = { id: string; title: string; updated: string; count: number; bg?: string; img?: string };
 
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const res = await fetch(path, body === undefined ? { method } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -23,7 +23,7 @@ export const api = {
   deletePref: (id: string) => call<Profile>(`/api/pref/${id}`, "DELETE"),
   threads: () => call<{ threads: ThreadMeta[] }>("/api/threads"),
   thread: (id: string) => call<ThreadMeta & { pages: any[] }>(`/api/threads/${id}`),
-  saveThread: (id: string, title: string, pages: unknown[]) => call<{ ok: boolean }>(`/api/threads/${id}`, "PUT", { title, pages }),
+  saveThread: (id: string, cover: { title: string; bg?: string; img?: string }, pages: unknown[]) => call<{ ok: boolean }>(`/api/threads/${id}`, "PUT", { ...cover, pages }),
   deleteThread: (id: string) => call<{ threads: ThreadMeta[] }>(`/api/threads/${id}`, "DELETE"),
 };
 

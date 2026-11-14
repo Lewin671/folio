@@ -24,6 +24,7 @@ const (
 )
 
 var (
+	hexRe   = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 	idRe    = regexp.MustCompile(`^[a-z0-9]{6,24}$`)
 	nameRe  = regexp.MustCompile(`^[a-f0-9]{24}\.(jpg|png|webp)$`)
 	imgRef  = regexp.MustCompile(`/api/img/([a-f0-9]{24}\.(?:jpg|png|webp))`)
@@ -37,6 +38,8 @@ type Meta struct {
 	Title   string    `json:"title"`
 	Updated time.Time `json:"updated"`
 	Count   int       `json:"count"`
+	Bg      string    `json:"bg,omitempty"`  // the first page's colour, for the list
+	Img     string    `json:"img,omitempty"` // and its main picture
 }
 
 type Thread struct {
@@ -89,12 +92,18 @@ func (s *Store) ImageFile(ref string) (string, bool) {
 func (s *Store) path(id string) string { return filepath.Join(s.threads, id+".json") }
 
 // Put saves a thread, replacing an earlier version of it.
-func (s *Store) Put(id, title string, pages json.RawMessage) error {
+func (s *Store) Put(id, title, bg, img string, pages json.RawMessage) error {
 	var list []json.RawMessage
 	if !idRe.MatchString(id) || json.Unmarshal(pages, &list) != nil || len(list) == 0 {
 		return ErrBad
 	}
-	t := Thread{Meta: Meta{ID: id, Title: title, Updated: time.Now().UTC(), Count: len(list)}, Pages: pages}
+	if !hexRe.MatchString(bg) {
+		bg = ""
+	}
+	if _, ok := s.ImageFile(img); !ok {
+		img = ""
+	}
+	t := Thread{Meta: Meta{ID: id, Title: title, Updated: time.Now().UTC(), Count: len(list), Bg: bg, Img: img}, Pages: pages}
 	buf, err := json.Marshal(t)
 	if err != nil {
 		return err

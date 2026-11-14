@@ -67,13 +67,15 @@ func (a *Agent) HandleThread(w http.ResponseWriter, r *http.Request) {
 func (a *Agent) HandleSaveThread(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title string          `json:"title"`
+		Bg    string          `json:"bg"`
+		Img   string          `json:"img"`
 		Pages json.RawMessage `json:"pages"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxThreadBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "这段记录太大了，没能保存。"})
 		return
 	}
-	err := a.Library.Put(r.PathValue("id"), clipRunes(body.Title, 60), body.Pages)
+	err := a.Library.Put(r.PathValue("id"), clipRunes(body.Title, 60), strings.TrimSpace(body.Bg), body.Img, body.Pages)
 	switch {
 	case errors.Is(err, library.ErrBad):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "没能保存这段记录。"})

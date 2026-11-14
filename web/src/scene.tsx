@@ -162,8 +162,8 @@ function Figure({ img }: { img?: Img }) {
         </AnimatePresence>
       </div>
       {!url && !img?.failed && <div className="figure-ghost" aria-hidden />}
-      {img?.pending && <figcaption>{url ? "正在换装" : "正在出图"}</figcaption>}
-      {img?.failed && <figcaption>{url ? "没换成功，保留原图" : "图没出来"}</figcaption>}
+      {img?.pending && <figcaption>{url ? "正在改图" : "正在出图"}</figcaption>}
+      {img?.failed && <figcaption>{url ? "没改成，保留原图" : "图没出来"}</figcaption>}
     </figure>
   );
 }

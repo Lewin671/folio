@@ -42,10 +42,15 @@ export function HistoryPanel({ current, onOpen, onDeleted, onClose }: Props) {
               {threads.map((t) => (
                 <li key={t.id} className={t.id === current ? "is-current" : ""}>
                   <button type="button" className="thread" onClick={() => onOpen(t.id)}>
-                    <strong>{t.title || "未命名的一页"}</strong>
-                    <small>
-                      {day(t.updated)} · {t.count} 页{t.id === current ? " · 正在看" : ""}
-                    </small>
+                    <span className="thread-pic" style={{ background: t.bg }}>
+                      {t.img && <img src={t.img} alt="" loading="lazy" />}
+                    </span>
+                    <span className="thread-text">
+                      <strong>{t.title || "未命名的一页"}</strong>
+                      <small>
+                        {day(t.updated)} · {t.count} 页{t.id === current ? " · 正在看" : ""}
+                      </small>
+                    </span>
                   </button>
                   <button
                     type="button"
