@@ -55,6 +55,8 @@ func Hint(err error) string {
 		return ""
 	}
 	switch {
+	case e.Code == "MissingKey":
+		return "还没有配置 ARK_API_KEY：把火山方舟的 API Key 填进 .env，然后重启。"
 	case e.Status == http.StatusUnauthorized:
 		return "火山 API Key 无效或已失效，请检查 ARK_API_KEY。"
 	case e.Status == http.StatusNotFound || e.Status == http.StatusForbidden || strings.Contains(e.Code, "ModelNotOpen"):
