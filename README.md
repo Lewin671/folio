@@ -6,7 +6,7 @@ Ask anything. Get a page.
 
 Folio answers a question with a page instead of a chat message. The layout, colors, type and pictures are composed on the spot to fit what you asked, and no two questions get the same page.
 
-https://github.com/user-attachments/assets/91c23648-41f3-4152-ad6c-b30a5b7a7ef1
+https://github.com/user-attachments/assets/9ba8025a-f054-443c-8ba5-57237417c59b
 
 A 75-second tour with narration and captions. It is a recording of the real app; the waits for pictures are cut short, as the caption strip says. If the player does not load, the file is at [`docs/demo.mp4`](docs/demo.mp4).
 

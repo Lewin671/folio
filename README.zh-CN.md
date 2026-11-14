@@ -6,7 +6,7 @@
 
 Folio 不回一段聊天文字，而是按你的问题现排一页界面：版式、配色、字体和图片都当场生成，每个问题得到的页面都不一样。
 
-https://github.com/user-attachments/assets/91c23648-41f3-4152-ad6c-b30a5b7a7ef1
+https://github.com/user-attachments/assets/9ba8025a-f054-443c-8ba5-57237417c59b
 
 75 秒的演示，英文旁白加字幕。画面是真实操作的录屏，等待出图的部分剪短了（字幕条上有注明）。播放器加载不出来时，文件在 [`docs/demo.mp4`](docs/demo.mp4)。
 
