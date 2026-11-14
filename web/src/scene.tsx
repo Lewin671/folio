@@ -9,15 +9,20 @@ const spring = { layout: { duration: 0.7, ease }, duration: 0.7, ease };
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const list = (v: unknown): any[] => (Array.isArray(v) ? v : []);
-const isSquare = (b: Op | undefined) => !!b && (b.kind === "flatlay" || b.kind === "detail");
-const swatchesOf = (b: Op) => list(b.items).filter((it) => validHex(it?.hex)).slice(0, 6);
+const kindOf = (b: Op | undefined) => str(b?.kind);
+/** Square pictures: a set of objects, a detail, a place, or whatever the user attached. */
+const isSquare = (b: Op | undefined) => ["set", "detail", "scene", "upload"].includes(kindOf(b));
+/** Pictures with no studio backdrop to continue, shown in a frame instead of merged into the page. */
+const isFramed = (b: Op | undefined) => ["scene", "upload"].includes(kindOf(b));
+const bandsOf = (b: Op) => list(b.items).filter((it) => validHex(it?.hex) && str(it?.name)).slice(0, 6);
 
 export type Stage = {
   /** How the screen is composed; decided by what the model actually sent, not only by the layout it named. */
   tpl: "center" | "side" | "gallery" | "bands" | "plain" | "note";
   hero?: Op; // the one picture the whole page is built around
   square: boolean;
-  bands?: Op; // palette colours shown as full-height bands
+  framed: boolean;
+  bands?: Op; // layers shown as full-height bands
   tiles: Op[];
   options: Op[];
   body: Op[];
@@ -30,19 +35,19 @@ export type Stage = {
 export function stageOf(head: Head, blocks: Op[]): Stage {
   const images = blocks.filter((b) => b.t === "image");
   const options = blocks.filter((b) => b.t === "option");
-  const isGallery = head.layout === "compare" || head.layout === "mood";
-  const bands = head.layout === "palette" ? blocks.find((b) => b.t === "swatches" && swatchesOf(b).length >= 2) : undefined;
+  const isGallery = head.layout === "compare" || head.layout === "gallery";
+  const bands = blocks.find((b) => b.t === "bands" && bandsOf(b).length >= 2);
   const hero = !isGallery && !bands ? images[0] : undefined;
   const tiles = bands ? [] : images.filter((b) => b !== hero);
   const body = blocks.filter((b) => b !== bands && renderers[b.t] && !isEmpty(b));
   const square = isSquare(hero);
   const hasContent = body.some((b) => b.t !== "actions");
   const tpl = hero
-    ? head.layout === "look" && !square ? "center" : "side"
+    ? head.layout === "subject" && !square ? "center" : "side"
     : bands ? "bands"
     : tiles.length || options.length ? "gallery"
     : head.layout === "note" || !hasContent ? "note" : "plain";
-  return { tpl, hero, square, bands, tiles, options, body };
+  return { tpl, hero, square, framed: isFramed(hero), bands, tiles, options, body };
 }
 
 type Props = {
@@ -56,6 +61,7 @@ type Props = {
 
 export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
   const { tpl, hero, bands, tiles, options, body } = stage;
+  const done = body.some((b) => b.t === "actions");
   const cls = ["scene", `is-${tpl}`, `layout-${head.layout}`, `tone-${head.tone}`].join(" ");
   const tileStyle = (b: Op) => {
     const c = midStop(images[b.id]?.stops) ?? (validHex(b.bg) ? b.bg.trim() : undefined);
@@ -66,32 +72,13 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
     <main className={cls}>
       <AnimatePresence>
         {hero && (
-          <motion.div key={hero.id} className={`hero ${stale.has(hero.id) ? "is-stale" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }}>
+          <motion.div key={hero.id} className={`hero ${stage.framed ? "is-framed" : ""} ${kindOf(hero) === "upload" ? "is-upload" : ""} ${stale.has(hero.id) ? "is-stale" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }}>
             <Figure img={images[hero.id]} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {bands && (
-        <div className={`bands ${swatchesOf(bands).length > 4 ? "is-many" : ""}`}>
-          {swatchesOf(bands).map((it, i, all) => (
-            <motion.div
-              key={i}
-              className="band"
-              style={{ background: it.hex, color: inkOn(it.hex) }}
-              initial={{ flexGrow: 0.001 }}
-              animate={{ flexGrow: 1 + (all.length - 1 - i) * 0.45 }}
-              transition={{ duration: 1.1, ease, delay: 0.12 * i }}
-            >
-              <div className="band-label">
-                <span className="band-role">{str(it.role)}</span>
-                <span className="band-name">{str(it.name)}</span>
-                <span className="band-hex">{String(it.hex).toUpperCase()}</span>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
+      {bands && <Bands op={bands} />}
 
       <header className="head">
         {str(head.kicker) && (
@@ -132,7 +119,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
               </motion.article>
             ))}
             {tiles.map((b, i) => (
-              <motion.div key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile picture ${isSquare(b) ? "is-square" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
+              <motion.div key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile picture ${isSquare(b) ? "is-square" : ""} ${isFramed(b) ? "is-framed" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
                 <Figure img={images[b.id]} />
               </motion.div>
             ))}
@@ -151,6 +138,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
             );
           })}
         </AnimatePresence>
+        {done && <p className="fineprint">由模型生成，可能有误，重要信息请核实。</p>}
       </div>
     </main>
   );
@@ -180,6 +168,35 @@ function Figure({ img }: { img?: Img }) {
   );
 }
 
+/** Layers of something, each a band of its own colour sized by its weight. */
+function Bands({ op }: { op: Op }) {
+  const items = bandsOf(op);
+  const rows = op.dir !== "cols";
+  const weights = items.map((it) => (typeof it.weight === "number" && it.weight > 0 ? it.weight : 1));
+  const top = Math.max(...weights);
+  return (
+    <div className={`bands ${rows ? "is-rows" : "is-cols"} ${items.length > 4 ? "is-many" : ""}`}>
+      {items.map((it, i) => (
+        <motion.div
+          key={i}
+          className="band"
+          style={{ background: it.hex, color: inkOn(it.hex) }}
+          initial={{ flexGrow: 0.001 }}
+          // Square root keeps a thin layer tall enough to carry its label.
+          animate={{ flexGrow: 0.7 + 2.3 * Math.sqrt(weights[i] / top) }}
+          transition={{ duration: 1.1, ease, delay: 0.12 * i }}
+        >
+          <div className="band-label">
+            <span className="band-value">{str(it.value)}</span>
+            <span className="band-name">{str(it.name)}</span>
+            {str(it.note) && <span className="band-note">{str(it.note)}</span>}
+          </div>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
 type BlockProps = { op: Op; onSay: (text: string) => void; busy: boolean };
 
 function isEmpty(b: Op) {
@@ -191,42 +208,50 @@ function isEmpty(b: Op) {
       return !list(b.do).length && !list(b.dont).length;
     case "checklist":
       return !list(b.groups).length;
+    case "quiz":
+      return !str(b.question) || list(b.options).length < 2;
     default:
       return !list(b.items).length;
   }
 }
+
+const Parts = ({ op, onSay, busy }: BlockProps) => (
+  <ul className="parts">
+    {list(op.items).slice(0, 6).map((it, i) => (
+      <li key={str(it.id) || i}>
+        <button type="button" disabled={busy} onClick={() => onSay(`展开讲讲「${str(it.name)}」`)}>
+          {validHex(it.hex) && <span className="dot" style={{ background: it.hex }} />}
+          <span className="part-text">
+            <span className="part-name">{str(it.name)}</span>
+            {str(it.note) && <span className="part-note">{str(it.note)}</span>}
+          </span>
+          <span className="part-more">展开</span>
+        </button>
+      </li>
+    ))}
+  </ul>
+);
 
 const renderers: Record<string, (p: BlockProps) => React.ReactNode> = {
   text: ({ op }) => <p className="text">{str(op.body)}</p>,
 
   quote: ({ op }) => <blockquote>{str(op.body)}</blockquote>,
 
-  pieces: ({ op, onSay, busy }) => (
-    <ul className="pieces">
-      {list(op.items).slice(0, 7).map((it, i) => (
-        <li key={str(it.id) || i}>
-          <button type="button" disabled={busy} onClick={() => onSay(`把「${str(it.name)}」换成另一件，你来定，其余不变`)}>
-            <span className="dot" style={validHex(it.hex) ? { background: it.hex } : undefined} />
-            <span className="piece-text">
-              <span className="piece-name">{str(it.name)}</span>
-              {str(it.note) && <span className="piece-note">{str(it.note)}</span>}
-            </span>
-            <span className="piece-swap">换一件</span>
-          </button>
+  parts: Parts,
+  pieces: Parts, // earlier name, still accepted
+
+  timeline: ({ op }) => (
+    <ol className="timeline">
+      {list(op.items).slice(0, 6).map((it, i) => (
+        <li key={i}>
+          <span className={`when ${[...str(it.when)].length > 7 ? "is-long" : ""}`}>{str(it.when)}</span>
+          <div>
+            <h3>{str(it.title)}</h3>
+            {str(it.body) && <p>{str(it.body)}</p>}
+          </div>
         </li>
       ))}
-    </ul>
-  ),
-
-  swatches: ({ op }) => (
-    <div className="swatches">
-      {swatchesOf(op).map((it, i) => (
-        <div key={i} className="swatch" style={{ background: it.hex, color: inkOn(it.hex) }}>
-          <span className="swatch-name">{str(it.name)}</span>
-          <span className="swatch-role">{str(it.role)}</span>
-        </div>
-      ))}
-    </div>
+    </ol>
   ),
 
   steps: ({ op }) => (
@@ -243,18 +268,43 @@ const renderers: Record<string, (p: BlockProps) => React.ReactNode> = {
     </ol>
   ),
 
+  cards: ({ op }) => <Cards items={list(op.items).filter((it) => str(it?.front)).slice(0, 6)} />,
+
+  quiz: ({ op }) => <Quiz op={op} />,
+
+  bars: ({ op }) => {
+    const items = list(op.items).filter((it) => typeof it?.value === "number" && it.value >= 0 && str(it.label)).slice(0, 7);
+    const top = Math.max(...items.map((it) => it.value), 1e-9);
+    return (
+      <div className="bars">
+        {items.map((it, i) => (
+          <div className="bar" key={i}>
+            <span className="bar-label">{str(it.label)}</span>
+            <span className="bar-track">
+              <motion.span className="bar-fill" initial={{ width: 0 }} animate={{ width: `${Math.max((it.value / top) * 100, 1.5)}%` }} transition={{ duration: 1, ease, delay: 0.08 * i }} />
+            </span>
+            <span className="bar-value">
+              {it.value.toLocaleString("zh-CN")}
+              {str(op.unit) && <small> {str(op.unit)}</small>}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  },
+
   rules: ({ op }) => (
     <div className="rules">
       {list(op.do).length > 0 && (
         <div className="rule-card">
-          <h3>这样做</h3>
-          <ul>{list(op.do).map((x, i) => <li key={i}>{str(x)}</li>)}</ul>
+          <h3>{str(op.doLabel) || "是这样"}</h3>
+          <ul>{list(op.do).slice(0, 4).map((x, i) => <li key={i}>{str(x)}</li>)}</ul>
         </div>
       )}
       {list(op.dont).length > 0 && (
         <div className="rule-card is-dont">
-          <h3>别这样</h3>
-          <ul>{list(op.dont).map((x, i) => <li key={i}>{str(x)}</li>)}</ul>
+          <h3>{str(op.dontLabel) || "不是这样"}</h3>
+          <ul>{list(op.dont).slice(0, 4).map((x, i) => <li key={i}>{str(x)}</li>)}</ul>
         </div>
       )}
     </div>
@@ -288,6 +338,58 @@ const renderers: Record<string, (p: BlockProps) => React.ReactNode> = {
   ),
 };
 
+/** Cards that turn over on a tap: the question in front, the answer behind. */
+function Cards({ items }: { items: any[] }) {
+  const [turned, setTurned] = useState<Set<number>>(new Set());
+  const flip = (i: number) =>
+    setTurned((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  return (
+    <div className="cards">
+      {items.map((it, i) => (
+        <button type="button" key={i} className={`card ${turned.has(i) ? "is-turned" : ""}`} onClick={() => flip(i)} aria-label={turned.has(i) ? "翻回正面" : "翻面看答案"}>
+          <span className="card-inner">
+            <span className="card-face card-front">
+              <small>{String(i + 1).padStart(2, "0")}</small>
+              {str(it.front)}
+            </span>
+            <span className="card-face card-back">{str(it.back)}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One question; the answer and the reason appear once an option is chosen. */
+function Quiz({ op }: { op: Op }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const options = list(op.options).slice(0, 4);
+  const answer = typeof op.answer === "number" ? op.answer : -1;
+  return (
+    <div className={`quiz ${picked !== null ? "is-answered" : ""}`}>
+      <h3>{str(op.question)}</h3>
+      <div className="quiz-options">
+        {options.map((o, i) => (
+          <button type="button" key={i} disabled={picked !== null} className={picked === null ? "" : i === answer ? "is-right" : i === picked ? "is-wrong" : "is-rest"} onClick={() => setPicked(i)}>
+            <span className="quiz-key">{"ABCD"[i]}</span>
+            {str(o)}
+          </button>
+        ))}
+      </div>
+      {picked !== null && (
+        <motion.p className="quiz-why" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+          {picked === answer ? "答对了。" : "不对。"}
+          {str(op.why)}
+        </motion.p>
+      )}
+    </div>
+  );
+}
+
 function Checklist({ groups }: { groups: any[] }) {
   const [done, setDone] = useState<Set<string>>(new Set());
   const toggle = (k: string) =>
@@ -300,7 +402,7 @@ function Checklist({ groups }: { groups: any[] }) {
   return (
     <div className="checklist">
       <p className="checklist-count">
-        <b>{done.size}</b> / {total} 已装
+        <b>{done.size}</b> / {total} 已完成
       </p>
       <div className="checklist-groups">
         {groups.map((g, gi) => (

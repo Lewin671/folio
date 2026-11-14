@@ -1,7 +1,7 @@
 import type { Op, StreamEvent, Turn } from "./types";
 import { mockTurn } from "./mock";
 
-export type TurnRequest = { input: string; history: Turn[]; images: Record<string, string> };
+export type TurnRequest = { input: string; history: Turn[]; images: Record<string, string>; image?: string };
 
 export const MOCK = new URLSearchParams(location.search).has("mock");
 

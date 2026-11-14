@@ -29,25 +29,32 @@ const (
 	maxInputRunes = 400
 	maxHistory    = 3
 	maxImages     = 4
+	maxTurnBytes  = 6 << 20 // room for one attached picture
 	imageTimeout  = 75 * time.Second
 )
 
-// Every picture is shot on a seamless backdrop in the scene colour (%s). The
-// page is then painted in the colour the picture really has, so the figure
-// stands directly on the page without background removal.
-var imageStyle = map[string]struct{ size, suffix string }{
-	"figure":  {"768x1200", "Full-body editorial fashion photograph, whole figure visible from head to shoes, centered, with empty space above the head and at both sides. Seamless studio backdrop and floor in one flat uniform colour: %s. Soft even light, only a faint contact shadow, no props, no text."},
-	"flatlay": {"960x960", "Flat lay photograph seen from directly above, items neatly arranged in the centre with space between them and a clear margin around. Flat uniform backdrop in %s. Soft even light, no text."},
-	"detail":  {"960x960", "Close-up fashion detail photograph, subject centred. Plain out-of-focus studio backdrop in %s. Soft even light, no text."},
+// Pictures of a subject are shot on a seamless backdrop in the scene colour
+// (%s). The page is then painted in the colour the picture really has, so the
+// subject stands directly on the page without background removal. A "scene"
+// is a full picture of a place or moment and is shown framed instead.
+type imageKind struct {
+	size, suffix string
+	framed       bool // no backdrop to continue: skip colour sampling
+}
+
+var imageStyle = map[string]imageKind{
+	"subject": {"768x1200", "Museum-catalogue studio image of the subject alone, whole subject visible and centred with generous empty space around it, photograph or realistic 3D render as fits the subject. Seamless backdrop and floor in one flat uniform colour: %s. Soft even light, no text, no labels, no captions, no people.", false},
+	"set":     {"960x960", "Flat lay seen from directly above, the objects neatly arranged in the centre with space between them and a clear margin around. Flat uniform backdrop in %s. Soft even light, no text, no labels.", false},
+	"detail":  {"960x960", "Close-up studio image of the detail, subject centred. Plain out-of-focus backdrop in %s. Soft even light, no text, no labels.", false},
+	"scene":   {"960x960", "Wide atmospheric image of the place or moment, natural light, cinematic and realistic, no text, no captions. Colour mood leaning towards %s.", true},
 }
 
 type Agent struct {
 	Ark         *ark.Client
 	TextModel   string
 	ImageModel  string
-	VisionModel string         // looks at uploaded photos
+	VisionModel string         // puts an attached picture into words
 	Profile     *profile.Store // what is remembered about the user
-	pending     uploads        // pictures waiting for "this one is me"
 	Debug       bool           // log every line the text model writes
 }
 
@@ -60,6 +67,7 @@ type request struct {
 	Input   string            `json:"input"`
 	History []turn            `json:"history"`
 	Images  map[string]string `json:"images"` // block id -> image URL of the previous scene
+	Image   string            `json:"image"`  // optional picture the question is about, as a data URL
 }
 
 type sse struct {
@@ -81,11 +89,14 @@ func (s *sse) send(event string, data any) {
 
 func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	var req request
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTurnBytes)).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	req.Input = strings.TrimSpace(req.Input)
+	if req.Input == "" && req.Image != "" {
+		req.Input = "这是什么？讲讲它。"
+	}
 	if req.Input == "" {
 		http.Error(w, "empty input", http.StatusBadRequest)
 		return
@@ -119,7 +130,25 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		}
 		msgs = append(msgs, ark.Message{Role: "user", Content: t.User}, ark.Message{Role: "assistant", Content: strings.Join(lines, "\n")})
 	}
-	msgs = append(msgs, ark.Message{Role: "user", Content: req.Input})
+	// The text model cannot see pictures, so an attached one is first put into
+	// words; the browser keeps those words as part of the question for later turns.
+	question := req.Input
+	if req.Image != "" {
+		seen, err := a.look(ctx, req.Image)
+		if err != nil {
+			log.Printf("look: %v", err)
+			msg := ark.Hint(err)
+			if msg == "" {
+				msg = "没能看清这张图，请换一张再试。"
+			}
+			out.send("error", map[string]any{"message": msg})
+			out.send("end", map[string]any{"ms": since()})
+			return
+		}
+		question = fmt.Sprintf("%s\n\n（用户附了一张图片。图片里是：%s）", req.Input, seen)
+		out.send("seen", map[string]any{"text": question})
+	}
+	msgs = append(msgs, ark.Message{Role: "user", Content: question})
 
 	var (
 		wg     sync.WaitGroup
@@ -190,7 +219,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		kind, _ := op["kind"].(string)
 		style, ok := imageStyle[kind]
 		if !ok {
-			style = imageStyle["figure"]
+			style = imageStyle["subject"]
 		}
 		bg, bgName := sceneBg, sceneBgName
 		if own, _ := op["bg"].(string); hexRe.MatchString(strings.TrimSpace(own)) {
@@ -198,16 +227,9 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			bgName, _ = op["bgName"].(string)
 		}
 		var refs []string
-		tryOn := false
 		if edit, _ := op["edit"].(bool); edit {
 			if ref := req.Images[id]; validRef(ref) {
 				refs = []string{ref}
-			}
-		}
-		// "me" dresses the user's own confirmed photo instead of an invented model.
-		if me, _ := op["me"].(bool); me && len(refs) == 0 && kind != "flatlay" && kind != "detail" {
-			if jpg, ok := a.Profile.MainPhoto(); ok {
-				refs, tryOn = []string{dataURL(jpg)}, true
 			}
 		}
 		wg.Add(1)
@@ -216,12 +238,9 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			ictx, cancel := context.WithTimeout(ctx, imageTimeout)
 			defer cancel()
 			t0 := time.Now()
-			full := prompt + " " + fmt.Sprintf(style.suffix, backdrop(bg, bgName))
-			switch {
-			case tryOn:
-				full = "Dress the person from the reference photo in this outfit: " + prompt + ". Keep their face, hair, skin tone and body shape exactly as in the reference photo; replace all clothing and the surroundings. " + fmt.Sprintf(style.suffix, backdrop(bg, bgName))
-			case len(refs) > 0:
-				full = prompt + " Keep the same backdrop colour."
+			full := prompt + ". " + fmt.Sprintf(style.suffix, backdrop(bg, bgName))
+			if len(refs) > 0 {
+				full = prompt + " Keep everything else, including the backdrop colour, the same."
 			}
 			u, err := a.Ark.Image(ictx, a.ImageModel, full, style.size, refs)
 			if err != nil {
@@ -233,9 +252,11 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// A picture without stops still shows, on the colour the model asked for.
-			stops, err := fetchStops(ictx, u)
-			if err != nil {
-				log.Printf("sample %s: %v", id, err)
+			var stops []string
+			if !style.framed {
+				if stops, err = fetchStops(ictx, u); err != nil {
+					log.Printf("sample %s: %v", id, err)
+				}
 			}
 			out.send("image", map[string]any{"id": id, "url": u, "stops": stops, "ms": since(), "took_ms": time.Since(t0).Milliseconds()})
 		}()

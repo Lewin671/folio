@@ -1,5 +1,5 @@
-// Atelier is an experiment in generative UI: a styling assistant whose every
-// answer is a page composed on the fly instead of a chat message.
+// Folio is an experiment in generative UI: an explainer whose every answer is
+// a page composed on the fly instead of a chat message.
 package main
 
 import (
@@ -28,7 +28,7 @@ func env(key, fallback string) string {
 func main() {
 	// Without a key the server still starts, so the page can say what is missing.
 	key := os.Getenv("ARK_API_KEY")
-	// Photos and preferences stay on this machine, readable only by this account.
+	// What is remembered about the user stays on this machine, readable only by this account.
 	store, err := profile.Open(env("DATA_DIR", "data"))
 	if err != nil {
 		log.Fatalf("profile store: %v", err)
@@ -49,18 +49,13 @@ func main() {
 	mux.HandleFunc("POST /api/turn", a.HandleTurn)
 	mux.HandleFunc("GET /api/profile", a.HandleProfile)
 	mux.HandleFunc("DELETE /api/profile", a.HandleClearProfile)
-	mux.HandleFunc("POST /api/photo/inspect", a.HandleInspect)
-	mux.HandleFunc("POST /api/photo/confirm", a.HandleConfirm)
-	mux.HandleFunc("GET /api/photo/{id}", a.HandlePhotoFile)
-	mux.HandleFunc("DELETE /api/photo/{id}", a.HandleDeletePhoto)
-	mux.HandleFunc("POST /api/photo/{id}/main", a.HandleMainPhoto)
 	mux.HandleFunc("DELETE /api/pref/{id}", a.HandleDeletePref)
 	mux.HandleFunc("GET /api/setup", a.HandleSetup)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("/", http.FileServerFS(web))
 
 	addr := env("ADDR", "127.0.0.1:8787")
-	log.Printf("atelier listening on %s (text=%s image=%s)", addr, a.TextModel, a.ImageModel)
+	log.Printf("folio listening on %s (text=%s image=%s)", addr, a.TextModel, a.ImageModel)
 	go func() {
 		if problems := a.Setup(context.Background()); len(problems) > 0 {
 			for _, p := range problems {

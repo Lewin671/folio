@@ -5,10 +5,10 @@ import { forHistory, MOCK, runTurn } from "./stream";
 import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
 import { COVERS } from "./covers";
-import { api, EMPTY, IdentifySheet, photoURL, ProfilePanel, Toasts, toJpeg, type Profile, type Sheet, type Toast } from "./profile";
+import { api, EMPTY, ProfilePanel, Toasts, toJpeg, type Profile, type Toast } from "./profile";
 
 // Shown on the cover as headlines; each leads to a different kind of page.
-const SUGGESTIONS = ["周五面试，想休闲一点", "黑西装还是藏青西装，第一套买哪个", "秋天的大地色怎么配", "十二月去冰岛一周带什么", "风衣怎么选版型", "想要松弛感的风格"];
+const SUGGESTIONS = ["水母没有大脑，怎么游泳", "拿铁和卡布奇诺有什么不同", "大气层分哪几层", "罗马帝国是怎么衰落的", "复利是怎么回事", "考考我太阳系"];
 
 type State = {
   head: Head | null;
@@ -17,15 +17,17 @@ type State = {
   images: Record<string, Img>;
   busy: boolean;
   asking: string; // the question being answered, shown until the first block arrives
+  attached: string; // the picture sent with this question, shown where the model places it
+  seen: string; // the question as the model received it, including what it saw in the picture
   turnOps: Op[]; // everything the model wrote this turn, for history
   history: Turn[];
   timing: Timing;
   error: string;
 };
 
-const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", turnOps: [], history: [], timing: {}, error: "" };
+const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "" };
 
-type Action = { type: "start"; input: string } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "reset" };
+type Action = { type: "start"; input: string; image?: string } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "reset" };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -33,20 +35,22 @@ function reducer(s: State, a: Action): State {
       return initial;
 
     case "start":
-      return { ...s, busy: true, asking: a.input, error: "", timing: {}, turnOps: [], stale: new Set(s.blocks.map((b) => b.id)) };
+      return { ...s, busy: true, asking: a.input, attached: a.image ?? "", seen: "", error: "", timing: {}, turnOps: [], stale: new Set(s.blocks.map((b) => b.id)) };
 
     case "finish": {
       // Whatever is still pending when the stream ends will never arrive.
       const images = { ...s.images };
       for (const [id, img] of Object.entries(images)) if (img.pending) images[id] = { ...img, pending: false, failed: true };
       const ok = !a.failed && s.turnOps.length > 0;
-      const history = ok ? [...s.history, { user: a.input, ops: forHistory(s.turnOps) }].slice(-3) : s.history;
+      const history = ok ? [...s.history, { user: s.seen || a.input, ops: forHistory(s.turnOps) }].slice(-3) : s.history;
       return { ...s, busy: false, asking: "", images, history, stale: new Set(), blocks: s.blocks.filter((b) => !s.stale.has(b.id)) };
     }
 
     case "event": {
       const { event, data } = a.e;
       switch (event) {
+        case "seen":
+          return { ...s, seen: String(data.text ?? "") };
         case "first":
           return { ...s, timing: { ...s.timing, first: data.ms } };
         case "scene_done":
@@ -93,7 +97,8 @@ function applyOp(s: State, op: Op): State {
   const images = { ...s.images };
   if (op.t === "image" || op.t === "option") {
     const prev = images[op.id];
-    if (op.pending) images[op.id] = op.edit && prev?.url ? { ...prev, failed: false, pending: true } : { pending: true };
+    if (op.kind === "upload" && s.attached) images[op.id] = { url: s.attached, pending: false };
+    else if (op.pending) images[op.id] = op.edit && prev?.url ? { ...prev, failed: false, pending: true } : { pending: true };
     else if (!op.keep || !prev) images[op.id] = prev && !op.prompt ? prev : { pending: false, failed: true };
   }
   return { ...s, turnOps, asking: "", stale, blocks: [...fresh, op, ...old], images };
@@ -116,7 +121,7 @@ export function App() {
   const [profile, setProfile] = useState<Profile>(EMPTY);
   const [problems, setProblems] = useState<string[]>([]); // what is missing in the setup, if anything
   const [panel, setPanel] = useState(false);
-  const [sheet, setSheet] = useState<Sheet | null>(null);
+  const [attach, setAttach] = useState(""); // a picture waiting to be sent with the next question
   const [toasts, setToasts] = useState<Toast[]>([]);
   const picker = useRef<HTMLInputElement>(null);
   const abort = useRef<AbortController | null>(null);
@@ -127,7 +132,7 @@ export function App() {
 
   // The field is the scene colour until the main picture arrives; then it
   // becomes that picture's own backdrop, so the figure stands on the page.
-  const heroStops = !s.head ? cover.stops : stage?.hero ? s.images[stage.hero.id]?.stops : undefined;
+  const heroStops = !s.head ? cover.stops : stage?.hero && !stage.framed ? s.images[stage.hero.id]?.stops : undefined;
   const flat = midStop(heroStops) ?? (s.head && validHex(s.head.bg) ? s.head.bg.trim() : "#8c857b");
   const field = heroStops?.length ? backdropGradient(heroStops, "var(--hero-top)", "var(--hero-h)") : flat;
   const theme = useMemo(() => stageTheme(flat, s.head?.accent), [flat, s.head?.accent]);
@@ -151,50 +156,25 @@ export function App() {
     window.setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 7000);
   }
 
-  const saved = (r: { photo: { id: string }; profile: Profile }, text: string) => {
-    setProfile(r.profile);
-    toast(text, () => api.deletePhoto(r.photo.id).then(setProfile, () => {}));
-  };
-
-  // A picture only enters the profile once it is settled which person in it
-  // is the user: recognised with high confidence, or pointed at by the user.
-  async function upload(file: File) {
-    setSheet({ stage: "looking" });
+  async function pickFile(file: File) {
     try {
-      const image = await toJpeg(file);
-      setSheet({ stage: "looking", image });
-      const result = await api.inspect(image);
-      if (!result.people.length || !result.token) return setSheet({ stage: "nobody", image });
-      if (result.auto) {
-        saved(await api.confirm(result.token, 0), "认出是你，已存进档案");
-        return setSheet(null);
-      }
-      setSheet({ stage: "choose", image, result });
-    } catch (e: any) {
-      setSheet({ stage: "error", message: String(e?.message ?? "请换一张图片再试。") });
-    }
-  }
-
-  async function pick(index: number) {
-    if (sheet?.stage !== "choose" || !sheet.result.token) return;
-    setSheet({ ...sheet, saving: true });
-    try {
-      saved(await api.confirm(sheet.result.token, index), "已存进档案，之后的穿搭会穿在你身上");
-      setSheet(null);
-    } catch (e: any) {
-      setSheet({ stage: "error", message: String(e?.message ?? "没存上，请再试一次。") });
+      setAttach(await toJpeg(file));
+    } catch {
+      toast("这张图读不出来，换一张试试");
     }
   }
 
   async function say(raw: string) {
-    const input = raw.trim();
+    const image = attach || undefined;
+    const input = raw.trim() || (image ? "这是什么？讲讲它。" : "");
     if (!input || state.current.busy) return;
     setDraft("");
+    setAttach("");
     window.scrollTo({ top: 0, behavior: "smooth" });
     const cur = state.current;
     const images: Record<string, string> = {};
     for (const [id, img] of Object.entries(cur.images)) if (img.url && /^https:/.test(img.url)) images[id] = img.url;
-    dispatch({ type: "start", input });
+    dispatch({ type: "start", input, image });
     const ctl = new AbortController();
     abort.current = ctl;
     let failed = false;
@@ -210,7 +190,7 @@ export function App() {
       } else dispatch({ type: "event", e });
     };
     try {
-      await runTurn({ input, history: cur.history, images }, onEvent, ctl.signal);
+      await runTurn({ input, history: cur.history, images, image }, onEvent, ctl.signal);
       await Promise.all(loading);
     } catch (err) {
       failed = true;
@@ -225,7 +205,6 @@ export function App() {
   }
 
   const waitingFirst = s.busy && !!s.asking;
-  const mainPhoto = profile.photos.find((p) => p.main);
   const heroClass = !s.head ? "hero-figure" : stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
 
   return (
@@ -239,7 +218,7 @@ export function App() {
 
       <nav className="top">
         <button type="button" className="brand" onClick={reset} title="回到开始">
-          Atelier
+          Folio
         </button>
         <span className="top-right">
           {(s.timing.first || s.busy) && (
@@ -249,7 +228,6 @@ export function App() {
           )}
           {MOCK && <span className="mock-flag">假数据</span>}
           <button type="button" className="profile-btn" onClick={() => setPanel(true)}>
-            {mainPhoto && <img src={photoURL(mainPhoto.id)} alt="" />}
             档案
           </button>
         </span>
@@ -276,8 +254,8 @@ export function App() {
               </div>
               <div className="cover-left">
                 <header>
-                  <h1 className="masthead">Atelier</h1>
-                  <p className="cover-note">今天穿成什么样，说一句，给你排一页。</p>
+                  <h1 className="masthead">Folio</h1>
+                  <p className="cover-note">问什么，都给你排一页。</p>
                 </header>
                 <ul className="cover-lines ">
                   {SUGGESTIONS.slice(0, 3).map((q, i) => (
@@ -327,9 +305,15 @@ export function App() {
             say(draft);
           }}
         >
-          <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label="上传你的照片" title="上传你的照片">
-            {s.busy ? <span className="orb" aria-hidden /> : "＋"}
-          </button>
+          {attach ? (
+            <button type="button" className="attach has-image" onClick={() => setAttach("")} aria-label="去掉这张图片" title="去掉这张图片">
+              <img src={attach} alt="" />
+            </button>
+          ) : (
+            <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label="附一张图片" title="附一张图片，问问这是什么">
+              {s.busy ? <span className="orb" aria-hidden /> : "＋"}
+            </button>
+          )}
           <input
             ref={picker}
             type="file"
@@ -338,25 +322,24 @@ export function App() {
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
-              if (file) upload(file);
+              if (file) pickFile(file);
             }}
           />
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={s.busy ? (s.asking ? "正在排这一页…" : "正在出图…") : s.head ? "接着说，比如“换成更正式的”" : "要去哪、做什么，直接说"}
+            placeholder={s.busy ? (s.asking ? "正在排这一页…" : "正在出图…") : attach ? "想问这张图什么？不写就直接讲" : s.head ? "接着问，比如“举个例子”" : "问点什么，或者附一张图"}
             maxLength={400}
             aria-label="输入你的问题"
           />
-          <button type="submit" className="send" disabled={!draft.trim() || s.busy} aria-label="发送">
+          <button type="submit" className="send" disabled={(!draft.trim() && !attach) || s.busy} aria-label="发送">
             ↑
           </button>
         </form>
       </div>
 
       <AnimatePresence>
-        {panel && <ProfilePanel key="panel" profile={profile} onChange={setProfile} onClose={() => setPanel(false)} onUpload={() => picker.current?.click()} />}
-        {sheet && <IdentifySheet key="sheet" sheet={sheet} onPick={pick} onClose={() => setSheet(null)} />}
+        {panel && <ProfilePanel key="panel" profile={profile} onChange={setProfile} onClose={() => setPanel(false)} />}
       </AnimatePresence>
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((ts) => ts.filter((t) => t.id !== id))} />
     </div>

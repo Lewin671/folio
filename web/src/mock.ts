@@ -11,122 +11,151 @@ const actions = (...labels: string[]): Op => ({
   items: labels.map((label) => ({ label, say: label })),
 });
 
-const look: Fixture = {
-  match: /面试|一套|look/,
-  images: { hero: pic.cobalt },
+const subject: Fixture = {
+  match: /水母|subject/,
+  images: { hero: pic.jelly },
   ops: [
-    { t: "scene", id: "s", layout: "look", tone: "editorial", bg: "#1C36A0", accent: "#F2D9A0", kicker: "面试 · 休闲", title: "松一点的正式", lede: "西装保留轮廓，其余全部换成软的。" },
-    { t: "image", id: "hero", kind: "figure", prompt: "x", pending: true },
-    { t: "pieces", id: "pieces", items: [
-      { id: "p1", name: "藏青无垫肩西装", note: "袖口推到小臂", hex: "#1F2A44" },
-      { id: "p2", name: "白色圆领 T 恤", note: "厚一点的棉，不透", hex: "#F7F6F2" },
-      { id: "p3", name: "米色直筒裤", note: "裤脚盖住鞋面一半", hex: "#D8CBB4" },
-      { id: "p4", name: "白色皮面板鞋", note: "擦干净比款式重要", hex: "#EFEFEA" },
+    { t: "scene", id: "s", layout: "subject", tone: "editorial", bg: "#0E2A5C", accent: "#BFE3FF", kicker: "海洋生物", title: "没有大脑也会游", lede: "一圈神经网指挥伞体收缩，一缩一放就往前走。" },
+    { t: "image", id: "hero", kind: "subject", prompt: "x", pending: true },
+    { t: "parts", id: "parts", items: [
+      { id: "p1", name: "伞体", note: "收缩一次，喷出一股水", hex: "#9FC4E8" },
+      { id: "p2", name: "神经网", note: "没有中枢，全身一起反应", hex: "#E8D9A0" },
+      { id: "p3", name: "触手", note: "带刺细胞，负责捕食" , hex: "#D7A0C8" },
     ] },
-    { t: "quote", id: "q", body: "面试官记住的是整洁，不是正式程度。" },
-    actions("更正式一点", "换掉西装", "男生版本"),
+    { t: "quote", id: "q", body: "它不是在想怎么游，是身体的节律在替它游。" },
+    actions("神经网是什么", "和章鱼比", "考考我"),
   ],
 };
 
-const swap: Fixture = {
-  match: /换掉|换成|换一件/,
-  images: { hero: pic.magenta },
+const deeper: Fixture = {
+  match: /展开|讲讲/,
+  images: { hero: pic.jelly },
   ops: [
-    { t: "scene", id: "s", layout: "look", tone: "editorial", bg: "#BE488A", accent: "#F6E7C8", kicker: "面试 · 休闲", title: "换成驼色", lede: "驼色比藏青更暖，适合创意类岗位。" },
-    { t: "image", id: "hero", kind: "figure", edit: true, prompt: "x", pending: true },
-    { t: "pieces", id: "pieces", items: [
-      { id: "p1", name: "驼色羊毛西装", note: "同样不垫肩", hex: "#B98A5E" },
-      { id: "p2", name: "白色圆领 T 恤", note: "厚一点的棉，不透", hex: "#F7F6F2" },
-      { id: "p3", name: "米色直筒裤", note: "裤脚盖住鞋面一半", hex: "#D8CBB4" },
-      { id: "p4", name: "白色皮面板鞋", note: "擦干净比款式重要", hex: "#EFEFEA" },
+    { t: "scene", id: "s", layout: "process", tone: "editorial", bg: "#0E2A5C", accent: "#BFE3FF", kicker: "水母 · 神经网", title: "一张会放电的网", lede: "信号从任意一点出发，都会传遍整个伞缘。" },
+    { t: "image", id: "hero", kind: "subject", keep: true },
+    { t: "steps", id: "steps", items: [
+      { title: "感受器发现变化", body: "伞缘的感觉棒感知光线和重力。" },
+      { title: "信号沿网扩散", body: "没有中枢，神经元彼此直接相连。" },
+      { title: "肌肉同时收缩", body: "整圈伞体一起收紧，把水挤出去。" },
     ] },
-    { t: "facts", id: "facts", items: [{ label: "正式度", value: "中" }, { label: "适合行业", value: "设计 / 媒体" }] },
-    actions("换回藏青", "加一条围巾", "男生版本"),
+    { t: "facts", id: "facts", items: [{ label: "出现时间", value: "约 5 亿年前" }, { label: "含水量", value: "约 95%" }] },
+    actions("回到水母", "和人脑比", "考考我"),
   ],
 };
 
 const compare: Fixture = {
-  match: /还是|哪个|compare/,
-  images: { o1: pic.cobalt, o2: pic.olive },
+  match: /不同|还是|哪个|compare/,
+  images: { o1: pic.moka, o2: pic.saturn },
   ops: [
-    { t: "scene", id: "s", layout: "compare", tone: "modern", bg: "#11131A", accent: "#8FA8FF", kicker: "第一套西装", title: "先买藏青", lede: "藏青的适用场合比黑色多一倍。" },
-    { t: "option", id: "o1", title: "藏青西装", tag: "更实用", pick: true, kind: "figure", prompt: "x", pending: true, points: ["面试、开会、婚礼都能穿", "配牛仔裤也不突兀", "白天晚上都成立"] },
-    { t: "option", id: "o2", title: "驼色西装", tag: "更有性格", kind: "figure", prompt: "x", pending: true, points: ["偏休闲，正式场合不够", "显气色，但挑下装颜色"] },
-    { t: "facts", id: "facts", items: [{ label: "藏青覆盖场合", value: "约 80%" }, { label: "驼色覆盖场合", value: "约 40%" }] },
-    { t: "quote", id: "q", body: "第一套的目标是什么都能配，不是最好看。" },
-    actions("看藏青怎么搭", "预算有限", "女生怎么选"),
+    { t: "scene", id: "s", layout: "compare", tone: "modern", bg: "#1B1512", accent: "#F2C078", kicker: "咖啡", title: "差在奶泡", lede: "浓缩一样多，区别是牛奶和奶泡的比例。" },
+    { t: "option", id: "o1", title: "拿铁", tag: "奶多泡薄", kind: "subject", prompt: "x", pending: true, points: ["牛奶约占三分之二", "奶泡只有薄薄一层", "口感顺，咖啡味淡"] },
+    { t: "option", id: "o2", title: "卡布奇诺", tag: "奶少泡厚", kind: "subject", prompt: "x", pending: true, points: ["浓缩、牛奶、奶泡各三分之一", "奶泡厚，入口先是泡", "咖啡味更明显"] },
+    { t: "bars", id: "bars", unit: "ml", items: [{ label: "拿铁的牛奶", value: 200 }, { label: "卡布奇诺的牛奶", value: 60 }] },
+    actions("澳白呢", "在家怎么做", "考考我"),
   ],
 };
 
-const palette: Fixture = {
-  match: /配色|颜色|大地色|palette/,
+const layers: Fixture = {
+  match: /大气|分层|哪几层|layers/,
   ops: [
-    { t: "scene", id: "s", layout: "palette", tone: "soft", bg: "#2B1D14", accent: "#E0A26B", kicker: "秋日配色", title: "大地色怎么配", lede: "米白打底、驼色主调、深棕收口，再加一点焦糖。" },
-    { t: "swatches", id: "sw", items: [
-      { hex: "#EFE6D6", name: "米白", role: "打底 60%" },
-      { hex: "#C89B6C", name: "驼色", role: "主调 30%" },
-      { hex: "#6B4A2F", name: "深棕", role: "收口 10%" },
-      { hex: "#B5542A", name: "焦糖", role: "点缀" },
+    { t: "scene", id: "s", layout: "layers", tone: "modern", bg: "#0B1026", accent: "#9FC4FF", kicker: "地球科学", title: "五层大气", lede: "越往上越稀薄，温度却忽冷忽热。" },
+    { t: "bands", id: "bands", dir: "rows", items: [
+      { name: "散逸层", value: "700 km 以上", note: "逐渐过渡到太空", hex: "#0B1026", weight: 30 },
+      { name: "热层", value: "85–700 km", note: "极光和空间站在这里", hex: "#27306B", weight: 40 },
+      { name: "中间层", value: "50–85 km", note: "流星在这里烧掉", hex: "#4A5FB0", weight: 14 },
+      { name: "平流层", value: "12–50 km", note: "臭氧层，客机巡航高度", hex: "#7FA6E0", weight: 16 },
+      { name: "对流层", value: "0–12 km", note: "天气都发生在这里", hex: "#CFE4F7", weight: 12 },
     ] },
-    { t: "rules", id: "rules", do: ["用米白做内搭，把脸和外套隔开", "下装选深棕，压稳整体", "鞋包选同色系"], dont: ["全身超过三个深浅层次", "把焦糖用在大面积外套上", "配冷调的灰"] },
-    { t: "quote", id: "q", body: "大地色不是棕色堆棕色，是有明有暗的层次。" },
-    actions("看一套穿搭", "加一个跳色", "黄皮能穿吗"),
+    { t: "facts", id: "facts", items: [{ label: "对流层占大气质量", value: "约 75%" }, { label: "太空的起点", value: "100 km" }] },
+    { t: "quote", id: "q", body: "我们活在最薄也最重的那一层里。" },
+    actions("为什么会分层", "臭氧层在哪", "考考我"),
   ],
 };
 
-const guide: Fixture = {
-  match: /怎么选|怎么穿|方法|guide/,
-  images: { hero: pic.olive },
+const timeline: Fixture = {
+  match: /罗马|历史|衰落|timeline/,
+  images: { hero: pic.rome },
   ops: [
-    { t: "scene", id: "s", layout: "guide", tone: "editorial", bg: "#6E6A47", accent: "#F0E2B6", kicker: "风衣 · 版型", title: "风衣怎么选", lede: "先看肩线，再看长度，最后才是颜色。" },
-    { t: "image", id: "hero", kind: "figure", prompt: "x", pending: true },
+    { t: "scene", id: "s", layout: "timeline", tone: "editorial", bg: "#5A2A1E", accent: "#F0C98A", kicker: "古罗马", title: "不是一夜崩塌", lede: "从极盛到西罗马灭亡，中间隔了三百多年。" },
+    { t: "image", id: "hero", kind: "scene", prompt: "x", pending: true },
+    { t: "timeline", id: "tl", items: [
+      { when: "117 年", title: "疆域最大", body: "图拉真时期，版图约 500 万平方公里。" },
+      { when: "235 年", title: "三世纪危机", body: "五十年里换了二十多位皇帝。" },
+      { when: "395 年", title: "东西分治", body: "帝国永久分成两半。" },
+      { when: "476 年", title: "西罗马灭亡", body: "最后一位皇帝被废黜。" },
+    ] },
+    actions("为什么会分裂", "东罗马后来呢", "考考我"),
+  ],
+};
+
+const process: Fixture = {
+  match: /复利|怎么回事|原理|怎么工作|process/,
+  ops: [
+    { t: "scene", id: "s", layout: "process", tone: "modern", bg: "#E3A92B", accent: "#1F2A44", kicker: "理财常识", title: "利息也生利息", lede: "时间越长，后面的增长越陡。" },
     { t: "steps", id: "steps", items: [
-      { title: "肩线落在肩骨外一指", body: "太合肩显旧，落太多显垮。" },
-      { title: "长度到膝盖下方", body: "一米六以下选膝上，腿会显长。" },
-      { title: "面料要有一点挺度", body: "软塌的风衣撑不起腰带。" },
+      { title: "本金产生利息", body: "1 万元，年利率 5%，一年后多 500。" },
+      { title: "利息并入本金", body: "第二年按 10,500 计息。" },
+      { title: "重复很多年", body: "增长从直线变成曲线。" },
     ] },
-    { t: "rules", id: "rules", do: ["系带子时在背后打结"], dont: ["把所有扣子都扣上"] },
-    actions("小个子版本", "选什么颜色", "搭什么鞋"),
+    { t: "bars", id: "bars", unit: "元", items: [{ label: "10 年", value: 16289 }, { label: "20 年", value: 26533 }, { label: "30 年", value: 43219 }] },
+    { t: "rules", id: "rules", doLabel: "事实", dontLabel: "误解", do: ["前十年看起来很慢"], dont: ["利率高一点点无所谓"] },
+    actions("72 法则", "和单利比", "考考我"),
   ],
 };
 
-const pack: Fixture = {
-  match: /带什么|行李|清单|pack/,
-  images: { hero: pic.flat },
+const study: Fixture = {
+  match: /考考|记住|出题|study/,
   ops: [
-    { t: "scene", id: "s", layout: "pack", tone: "modern", bg: "#9CBDD6", accent: "#12324A", kicker: "冰岛 · 七天", title: "三层穿法", lede: "排汗、保暖、防风各一层，其余都是多余的。" },
-    { t: "image", id: "hero", kind: "flatlay", prompt: "x", pending: true },
-    { t: "facts", id: "facts", items: [{ label: "气温", value: "-2–5°C" }, { label: "风", value: "常年大" }, { label: "行李", value: "一只登机箱" }] },
+    { t: "scene", id: "s", layout: "study", tone: "modern", bg: "#2B1B4A", accent: "#F2D36B", kicker: "太阳系 · 自测", title: "三道题", lede: "先翻卡片过一遍，再答题。" },
+    { t: "cards", id: "cards", items: [
+      { front: "最大的行星", back: "木星，直径约为地球的 11 倍" },
+      { front: "最热的行星", back: "金星，表面约 465°C" },
+      { front: "有明显光环的行星", back: "土星最显眼，其余三颗气态行星也有" },
+      { front: "离太阳最近的行星", back: "水星" },
+    ] },
+    { t: "quiz", id: "q1", question: "哪颗行星的一天比一年还长？", options: ["水星", "金星", "火星"], answer: 1, why: "金星自转一圈约 243 个地球日，公转一圈约 225 个地球日。" },
+    { t: "quiz", id: "q2", question: "太阳系里最高的山在哪颗星球上？", options: ["火星", "地球", "木卫一"], answer: 0, why: "火星的奥林帕斯山高约 22 公里。" },
+    actions("再来三道", "讲讲金星", "换成恒星"),
+  ],
+};
+
+const gallery: Fixture = {
+  match: /风格|哪些|种类|gallery/,
+  images: { m1: pic.saturn, m2: pic.fossils, m3: pic.rome },
+  ops: [
+    { t: "scene", id: "s", layout: "gallery", tone: "soft", bg: "#E9DDCB", accent: "#A8553F", kicker: "化石", title: "石头里的生命", lede: "遗体、痕迹和树脂，都能把生命留下来。" },
+    { t: "image", id: "m1", kind: "subject", prompt: "x", pending: true },
+    { t: "image", id: "m2", kind: "set", prompt: "x", pending: true },
+    { t: "image", id: "m3", kind: "scene", prompt: "x", pending: true },
+    { t: "rules", id: "rules", doLabel: "容易留下", dontLabel: "很难留下", do: ["壳、骨头、牙齿", "被快速掩埋的"], dont: ["柔软的身体", "暴露在空气里的"] },
+    { t: "quote", id: "q", body: "能变成化石的，不到万分之一。" },
+    actions("琥珀怎么形成", "怎么测年代", "考考我"),
+  ],
+};
+
+const plan: Fixture = {
+  match: /学.*哪些|路线|清单|plan/,
+  images: { hero: pic.fossils },
+  ops: [
+    { t: "scene", id: "s", layout: "plan", tone: "modern", bg: "#8FA68A", accent: "#1F3A2A", kicker: "入门路线", title: "四周学会看化石", lede: "先认类型，再学年代，最后去一次博物馆。" },
+    { t: "image", id: "hero", kind: "set", prompt: "x", pending: true },
+    { t: "facts", id: "facts", items: [{ label: "每周投入", value: "3 小时" }, { label: "总时长", value: "4 周" }] },
     { t: "checklist", id: "list", groups: [
-      { title: "贴身层", items: ["美利奴长袖 ×2", "美利奴打底裤 ×1", "羊毛袜 ×4"] },
-      { title: "保暖层", items: ["抓绒衣 ×1", "薄羽绒 ×1"] },
-      { title: "外层", items: ["防水硬壳 ×1", "防水裤 ×1"] },
-      { title: "配件", items: ["毛线帽", "防水手套", "泳衣（温泉）", "防滑鞋底套"] },
+      { title: "第一周", items: ["化石是怎么形成的", "实体化石和遗迹化石"] },
+      { title: "第二周", items: ["三叶虫", "菊石", "鲨鱼牙"] },
+      { title: "第三周", items: ["地质年代表", "怎么测定年代"] },
+      { title: "第四周", items: ["逛一次自然博物馆", "自己做一张笔记"] },
     ] },
-    actions("夏天去呢", "要拍照好看", "压缩到背包"),
-  ],
-};
-
-const mood: Fixture = {
-  match: /风格|感觉|灵感|mood/,
-  images: { m1: pic.olive, m2: pic.flat, m3: pic.magenta },
-  ops: [
-    { t: "scene", id: "s", layout: "mood", tone: "soft", bg: "#E9DDCB", accent: "#A8553F", kicker: "风格", title: "松弛感", lede: "不是随便穿，是每一件都大半号。" },
-    { t: "image", id: "m1", kind: "figure", prompt: "x", pending: true },
-    { t: "image", id: "m2", kind: "flatlay", prompt: "x", pending: true },
-    { t: "image", id: "m3", kind: "figure", prompt: "x", pending: true },
-    { t: "rules", id: "rules", do: ["天然面料，允许有褶", "低饱和，同色系叠穿"], dont: ["明显的 logo", "紧身加高跟"] },
-    { t: "quote", id: "q", body: "看起来没用力，是最费力的。" },
-    actions("给我一套", "适合通勤吗", "要哪些基础款"),
+    actions("推荐几本书", "压缩到两周", "考考我"),
   ],
 };
 
 const note: Fixture = {
-  match: /几点|天气|note/,
+  match: /几点|你好|note/,
   ops: [
-    { t: "scene", id: "s", layout: "note", tone: "editorial", bg: "#3A2F5B", accent: "#E6C7FF", kicker: "不在行", title: "这个我答不好", lede: "我只懂穿搭。" },
-    { t: "text", id: "tx", body: "不过可以告诉我你要去哪、做什么，我来帮你决定穿什么。" },
-    actions("周五面试穿什么", "秋天怎么配色"),
+    { t: "scene", id: "s", layout: "note", tone: "editorial", bg: "#3A2F5B", accent: "#E6C7FF", kicker: "你好", title: "问点什么吧", lede: "一个东西、一段历史、一个原理，都可以。" },
+    { t: "text", id: "tx", body: "也可以附一张图，让我讲讲它是什么。" },
+    actions("水母怎么游泳", "考考我太阳系"),
   ],
 };
 
@@ -135,33 +164,20 @@ const crowded: Fixture = {
   match: /拥挤|crowded/,
   images: { hero: null },
   ops: [
-    { t: "scene", id: "s", layout: "look", tone: "modern", bg: "not-a-colour", accent: "#F5F0A0", kicker: "一个特别特别长的话题标签用来测试", title: "这是一个超出十二个字限制的非常长的标题看看会怎样", lede: "这句结论也写得很长很长，用来确认在窄屏幕和宽屏幕上都不会把版面撑破，也不会和旁边的图片重叠在一起。" },
-    { t: "image", id: "hero", kind: "figure", prompt: "x", pending: true },
-    { t: "pieces", id: "pieces", items: Array.from({ length: 9 }, (_, i) => ({ id: "p" + i, name: i === 2 ? "一件名字非常非常长的双面羊绒落肩茧型大衣外套" : "单品 " + (i + 1), note: i % 2 ? "" : "备注也可以很长很长很长很长很长很长很长很长很长", hex: i === 4 ? "not-a-colour" : "#7A6A58" })) },
-    { t: "facts", id: "facts", items: [{ label: "气温", value: "-12–35°C" }, { label: "场合", value: "通勤 / 约会 / 出差 / 婚礼" }, { label: "预算", value: "¥12,000" }, { label: "件数", value: "9" }] },
+    { t: "scene", id: "s", layout: "subject", tone: "modern", bg: "not-a-colour", accent: "#F5F0A0", kicker: "一个特别特别长的话题标签用来测试", title: "这是一个超出八个字限制的非常长的标题看看会怎样", lede: "这句结论也写得很长很长，用来确认在窄屏幕和宽屏幕上都不会把版面撑破，也不会和旁边的图片重叠在一起。" },
+    { t: "image", id: "hero", kind: "subject", prompt: "x", pending: true },
+    { t: "parts", id: "parts", items: Array.from({ length: 9 }, (_, i) => ({ id: "p" + i, name: i === 2 ? "一个名字非常非常长的组成部分用来测试换行" : "部分 " + (i + 1), note: i % 2 ? "" : "备注也可以很长很长很长很长很长很长很长很长很长", hex: i === 4 ? "not-a-colour" : "#7A6A58" })) },
+    { t: "facts", id: "facts", items: [{ label: "温度", value: "-12–35°C" }, { label: "范围", value: "欧洲 / 亚洲 / 北美 / 非洲" }, { label: "数量", value: "12,000" }, { label: "种类", value: "9" }] },
+    { t: "quiz", id: "qz", question: "一道选项很长的题目用来测试", options: ["第一个选项写得特别特别长看看会不会撑破", "第二个", "第三个", "第四个"], answer: 9, why: "" },
     { t: "unknown-block", id: "zz", body: "前端不认识的块应当被忽略" },
     { t: "text", id: "tx", body: "" },
     actions("一个很长很长的下一步按钮", "第二个", "第三个", "第四个"),
   ],
 };
 
-// The model sometimes offers alternatives inside a single-outfit page.
-const lookWithOptions: Fixture = {
-  match: /备选|options/,
-  images: { hero: pic.cobalt, o1: pic.magenta, o2: pic.olive },
-  ops: [
-    look.ops[0],
-    look.ops[1],
-    { t: "option", id: "o1", title: "驼色西装", tag: "更暖", pick: true, kind: "figure", prompt: "x", pending: true, points: ["适合创意岗位"] },
-    { t: "option", id: "o2", title: "灰色开衫", tag: "更软", kind: "figure", prompt: "x", pending: true, points: ["最休闲的一档"] },
-    look.ops[2],
-    actions("选驼色", "选开衫"),
-  ],
-};
-
 const failing: Fixture = { match: /出错|error/, ops: [] };
 
-const fixtures = [lookWithOptions, swap, compare, palette, guide, pack, mood, note, crowded, failing, look];
+const fixtures = [deeper, study, compare, layers, timeline, process, gallery, plan, note, crowded, failing, subject];
 
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -170,7 +186,7 @@ const sleep = (ms: number, signal: AbortSignal) =>
   });
 
 export async function mockTurn(input: string, onEvent: (e: StreamEvent) => void, signal: AbortSignal) {
-  const fx = fixtures.find((f) => f.match.test(input)) ?? look;
+  const fx = fixtures.find((f) => f.match.test(input)) ?? subject;
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0);
   await sleep(700, signal);
