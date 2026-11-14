@@ -4,15 +4,10 @@ import type { Head, Img, Op, StreamEvent, Timing, Turn } from "./types";
 import { forHistory, MOCK, runTurn } from "./stream";
 import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
+import { COVERS } from "./covers";
 
-const SUGGESTIONS = [
-  { hint: "一整套", say: "周五面试，想休闲一点" },
-  { hint: "二选一", say: "黑西装还是藏青西装，第一套买哪个" },
-  { hint: "配色", say: "秋天的大地色怎么配" },
-  { hint: "清单", say: "十二月去冰岛一周带什么" },
-  { hint: "方法", say: "风衣怎么选版型" },
-  { hint: "灵感", say: "想要松弛感的风格" },
-];
+// Shown on the cover as headlines; each leads to a different kind of page.
+const SUGGESTIONS = ["周五面试，想休闲一点", "黑西装还是藏青西装，第一套买哪个", "秋天的大地色怎么配", "十二月去冰岛一周带什么", "风衣怎么选版型", "想要松弛感的风格"];
 
 type State = {
   head: Head | null;
@@ -103,8 +98,6 @@ function applyOp(s: State, op: Op): State {
   return { ...s, turnOps, asking: "", stale, blocks: [...fresh, op, ...old], images };
 }
 
-const HOME_FIELD = "radial-gradient(90% 70% at 50% 108%, #4a3a2e 0%, #1d1815 46%, #0d0c0b 100%)";
-
 /** Resolves once the browser has the picture, so it can appear together with its colour field. */
 const preload = (url: string) =>
   new Promise<void>((resolve) => {
@@ -117,6 +110,8 @@ export function App() {
   const [s, dispatch] = useReducer(reducer, initial);
   const [draft, setDraft] = useState("");
   const [showTiming, setShowTiming] = useState(false);
+  // The home screen is a magazine cover: one of the shipped pictures on its own backdrop.
+  const [cover] = useState(() => COVERS[Math.floor(Math.random() * COVERS.length)]);
   const abort = useRef<AbortController | null>(null);
   const state = useRef(s);
   state.current = s;
@@ -125,9 +120,9 @@ export function App() {
 
   // The field is the scene colour until the main picture arrives; then it
   // becomes that picture's own backdrop, so the figure stands on the page.
-  const heroStops = stage?.hero ? s.images[stage.hero.id]?.stops : undefined;
-  const flat = !s.head ? "#14110f" : midStop(heroStops) ?? (validHex(s.head.bg) ? s.head.bg.trim() : "#8c857b");
-  const field = !s.head ? HOME_FIELD : heroStops?.length ? backdropGradient(heroStops, "var(--hero-top)", "var(--hero-h)") : flat;
+  const heroStops = !s.head ? cover.stops : stage?.hero ? s.images[stage.hero.id]?.stops : undefined;
+  const flat = midStop(heroStops) ?? (s.head && validHex(s.head.bg) ? s.head.bg.trim() : "#8c857b");
+  const field = heroStops?.length ? backdropGradient(heroStops, "var(--hero-top)", "var(--hero-h)") : flat;
   const theme = useMemo(() => stageTheme(flat, s.head?.accent), [flat, s.head?.accent]);
   useEffect(() => {
     const root = document.documentElement.style;
@@ -172,7 +167,7 @@ export function App() {
   }
 
   const waitingFirst = s.busy && !!s.asking;
-  const heroClass = stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
+  const heroClass = !s.head ? "hero-figure" : stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
 
   return (
     <div className={`app ${s.busy ? "is-busy" : ""} ${waitingFirst ? "is-thinking" : ""} ${s.head ? "" : "is-home"} ${theme.dark ? "on-dark" : "on-light"} ${heroClass} ${stage ? "tpl-" + stage.tpl : ""}`}>
@@ -209,21 +204,41 @@ export function App() {
             </motion.div>
           ) : (
             <motion.div key="home" className="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.8 }}>
-              <h1>
-                今天，
-                <br />
-                穿成什么样
-              </h1>
-              <ul>
-                {SUGGESTIONS.map((x, i) => (
-                  <motion.li key={x.say} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 + i * 0.07, ease: [0.22, 1, 0.36, 1] }}>
-                    <button type="button" onClick={() => say(x.say)}>
-                      <span className="hint">{x.hint}</span>
-                      <span className="say">{x.say}</span>
-                    </button>
-                  </motion.li>
-                ))}
-              </ul>
+              <div className="hero">
+                <figure className="figure">
+                  <div className="figure-imgs">
+                    <img src={cover.url} alt="" draggable={false} />
+                  </div>
+                </figure>
+              </div>
+              <div className="cover-left">
+                <header>
+                  <h1 className="masthead">Atelier</h1>
+                  <p className="cover-note">今天穿成什么样，说一句，给你排一页。</p>
+                </header>
+                <ul className="cover-lines ">
+                  {SUGGESTIONS.slice(0, 3).map((q, i) => (
+                    <li key={q}>
+                      <button type="button" onClick={() => say(q)}>
+                        <span className="n">{String(i + 1 + 0).padStart(2, "0")}</span>
+                        {q}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="cover-right">
+                <ul className="cover-lines ">
+                  {SUGGESTIONS.slice(3, 6).map((q, i) => (
+                    <li key={q}>
+                      <button type="button" onClick={() => say(q)}>
+                        <span className="n">{String(i + 1 + 3).padStart(2, "0")}</span>
+                        {q}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -242,7 +257,7 @@ export function App() {
             say(draft);
           }}
         >
-          <span className="orb" aria-hidden />
+          {s.busy && <span className="orb" aria-hidden />}
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
