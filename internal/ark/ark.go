@@ -1,5 +1,5 @@
 // Package ark is a minimal client for the Volcengine Ark data-plane API:
-// streaming chat completions and image generation.
+// streaming chat completions, image understanding and image generation.
 package ark
 
 import (
@@ -100,6 +100,41 @@ func (c *Client) ChatStream(ctx context.Context, model string, msgs []Message, m
 		}
 	}
 	return sc.Err()
+}
+
+// Vision asks a question about one or more images (URLs or data URLs) and
+// returns the whole answer. Temperature is zero: these are judgements, not copy.
+func (c *Client) Vision(ctx context.Context, model, prompt string, images []string) (string, error) {
+	content := make([]map[string]any, 0, len(images)+1)
+	for _, u := range images {
+		content = append(content, map[string]any{"type": "image_url", "image_url": map[string]string{"url": u}})
+	}
+	content = append(content, map[string]any{"type": "text", "text": prompt})
+	resp, err := c.post(ctx, "/chat/completions", map[string]any{
+		"model":       model,
+		"messages":    []map[string]any{{"role": "user", "content": content}},
+		"max_tokens":  700,
+		"temperature": 0,
+		"thinking":    map[string]string{"type": "disabled"},
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("ark vision: empty result")
+	}
+	return out.Choices[0].Message.Content, nil
 }
 
 // Image generates one image and returns its URL. refs are optional reference

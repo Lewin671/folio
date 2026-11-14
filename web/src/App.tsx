@@ -5,6 +5,7 @@ import { forHistory, MOCK, runTurn } from "./stream";
 import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
 import { COVERS } from "./covers";
+import { api, EMPTY, IdentifySheet, photoURL, ProfilePanel, Toasts, toJpeg, type Profile, type Sheet, type Toast } from "./profile";
 
 // Shown on the cover as headlines; each leads to a different kind of page.
 const SUGGESTIONS = ["周五面试，想休闲一点", "黑西装还是藏青西装，第一套买哪个", "秋天的大地色怎么配", "十二月去冰岛一周带什么", "风衣怎么选版型", "想要松弛感的风格"];
@@ -112,6 +113,11 @@ export function App() {
   const [showTiming, setShowTiming] = useState(false);
   // The home screen is a magazine cover: one of the shipped pictures on its own backdrop.
   const [cover] = useState(() => COVERS[Math.floor(Math.random() * COVERS.length)]);
+  const [profile, setProfile] = useState<Profile>(EMPTY);
+  const [panel, setPanel] = useState(false);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const picker = useRef<HTMLInputElement>(null);
   const abort = useRef<AbortController | null>(null);
   const state = useRef(s);
   state.current = s;
@@ -133,6 +139,51 @@ export function App() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.bg);
   }, [theme]);
 
+  useEffect(() => {
+    api.profile().then(setProfile, () => {}); // without a server (offline fixtures) the profile just stays empty
+  }, []);
+
+  function toast(text: string, undo?: () => void) {
+    const id = Date.now() + Math.random();
+    setToasts((ts) => [...ts.slice(-2), { id, text, undo }]);
+    window.setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 7000);
+  }
+
+  const saved = (r: { photo: { id: string }; profile: Profile }, text: string) => {
+    setProfile(r.profile);
+    toast(text, () => api.deletePhoto(r.photo.id).then(setProfile, () => {}));
+  };
+
+  // A picture only enters the profile once it is settled which person in it
+  // is the user: recognised with high confidence, or pointed at by the user.
+  async function upload(file: File) {
+    setSheet({ stage: "looking" });
+    try {
+      const image = await toJpeg(file);
+      setSheet({ stage: "looking", image });
+      const result = await api.inspect(image);
+      if (!result.people.length || !result.token) return setSheet({ stage: "nobody", image });
+      if (result.auto) {
+        saved(await api.confirm(result.token, 0), "认出是你，已存进档案");
+        return setSheet(null);
+      }
+      setSheet({ stage: "choose", image, result });
+    } catch (e: any) {
+      setSheet({ stage: "error", message: String(e?.message ?? "请换一张图片再试。") });
+    }
+  }
+
+  async function pick(index: number) {
+    if (sheet?.stage !== "choose" || !sheet.result.token) return;
+    setSheet({ ...sheet, saving: true });
+    try {
+      saved(await api.confirm(sheet.result.token, index), "已存进档案，之后的穿搭会穿在你身上");
+      setSheet(null);
+    } catch (e: any) {
+      setSheet({ stage: "error", message: String(e?.message ?? "没存上，请再试一次。") });
+    }
+  }
+
   async function say(raw: string) {
     const input = raw.trim();
     if (!input || state.current.busy) return;
@@ -147,7 +198,12 @@ export function App() {
     let failed = false;
     const loading: Promise<void>[] = [];
     const onEvent = (e: StreamEvent) => {
-      if (e.event === "image" && typeof e.data?.url === "string") {
+      if (e.event === "memory") {
+        // The model noted a lasting preference; show it so it can be taken back.
+        const added: { id: string; text: string }[] = Array.isArray(e.data?.added) ? e.data.added : [];
+        if (e.data?.profile) setProfile(e.data.profile);
+        if (added.length) toast("记住了：" + added.map((p) => p.text).join("、"), () => Promise.all(added.map((p) => api.deletePref(p.id))).then((ps) => ps.length && setProfile(ps[ps.length - 1]), () => {}));
+      } else if (e.event === "image" && typeof e.data?.url === "string") {
         loading.push(preload(e.data.url).then(() => void (ctl.signal.aborted || dispatch({ type: "event", e }))));
       } else dispatch({ type: "event", e });
     };
@@ -167,6 +223,7 @@ export function App() {
   }
 
   const waitingFirst = s.busy && !!s.asking;
+  const mainPhoto = profile.photos.find((p) => p.main);
   const heroClass = !s.head ? "hero-figure" : stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
 
   return (
@@ -189,6 +246,10 @@ export function App() {
             </button>
           )}
           {MOCK && <span className="mock-flag">假数据</span>}
+          <button type="button" className="profile-btn" onClick={() => setPanel(true)}>
+            {mainPhoto && <img src={photoURL(mainPhoto.id)} alt="" />}
+            档案
+          </button>
         </span>
       </nav>
 
@@ -257,20 +318,38 @@ export function App() {
             say(draft);
           }}
         >
-          {s.busy && <span className="orb" aria-hidden />}
+          <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label="上传你的照片" title="上传你的照片">
+            {s.busy ? <span className="orb" aria-hidden /> : "＋"}
+          </button>
+          <input
+            ref={picker}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) upload(file);
+            }}
+          />
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={s.busy ? (s.asking ? "正在排这一页…" : "正在出图…") : s.head ? "接着说，比如“换成更正式的”" : "要去哪、做什么，直接说"}
             maxLength={400}
             aria-label="输入你的问题"
-            autoFocus
           />
-          <button type="submit" disabled={!draft.trim() || s.busy} aria-label="发送">
+          <button type="submit" className="send" disabled={!draft.trim() || s.busy} aria-label="发送">
             ↑
           </button>
         </form>
       </div>
+
+      <AnimatePresence>
+        {panel && <ProfilePanel key="panel" profile={profile} onChange={setProfile} onClose={() => setPanel(false)} onUpload={() => picker.current?.click()} />}
+        {sheet && <IdentifySheet key="sheet" sheet={sheet} onPick={pick} onClose={() => setSheet(null)} />}
+      </AnimatePresence>
+      <Toasts toasts={toasts} onDismiss={(id) => setToasts((ts) => ts.filter((t) => t.id !== id))} />
     </div>
   );
 }

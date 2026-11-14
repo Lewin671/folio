@@ -11,6 +11,7 @@ import (
 
 	"atelier/internal/agent"
 	"atelier/internal/ark"
+	"atelier/internal/profile"
 )
 
 //go:embed all:web/dist
@@ -28,11 +29,18 @@ func main() {
 	if key == "" {
 		log.Fatal("ARK_API_KEY is not set")
 	}
+	// Photos and preferences stay on this machine, readable only by this account.
+	store, err := profile.Open(env("DATA_DIR", "data"))
+	if err != nil {
+		log.Fatalf("profile store: %v", err)
+	}
 	a := &agent.Agent{
-		Ark:        ark.New(key, os.Getenv("ARK_BASE_URL")),
-		TextModel:  env("TEXT_MODEL", "deepseek-v4-1-flash-261017"),
-		ImageModel: env("IMAGE_MODEL", "doubao-seedream-5-0-flash-260915"),
-		Debug:      os.Getenv("DEBUG") != "",
+		Ark:         ark.New(key, os.Getenv("ARK_BASE_URL")),
+		TextModel:   env("TEXT_MODEL", "deepseek-v4-1-flash-261017"),
+		ImageModel:  env("IMAGE_MODEL", "doubao-seedream-5-0-flash-260915"),
+		VisionModel: env("VISION_MODEL", "doubao-seed-2-0-mini-260428"),
+		Profile:     store,
+		Debug:       os.Getenv("DEBUG") != "",
 	}
 	web, err := fs.Sub(dist, "web/dist")
 	if err != nil {
@@ -40,6 +48,14 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/turn", a.HandleTurn)
+	mux.HandleFunc("GET /api/profile", a.HandleProfile)
+	mux.HandleFunc("DELETE /api/profile", a.HandleClearProfile)
+	mux.HandleFunc("POST /api/photo/inspect", a.HandleInspect)
+	mux.HandleFunc("POST /api/photo/confirm", a.HandleConfirm)
+	mux.HandleFunc("GET /api/photo/{id}", a.HandlePhotoFile)
+	mux.HandleFunc("DELETE /api/photo/{id}", a.HandleDeletePhoto)
+	mux.HandleFunc("POST /api/photo/{id}/main", a.HandleMainPhoto)
+	mux.HandleFunc("DELETE /api/pref/{id}", a.HandleDeletePref)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("/", http.FileServerFS(web))
 

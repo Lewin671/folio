@@ -92,3 +92,21 @@ func TestEdgeStops(t *testing.T) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
+
+func TestJSONIn(t *testing.T) {
+	var got struct{ Index int }
+	if err := jsonIn("```json\n{\"index\": 2}\n```\n以上。", &got); err != nil || got.Index != 2 {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+	if jsonIn("看不清", &got) == nil {
+		t.Fatal("prose without JSON must be an error")
+	}
+}
+
+func TestCropPerson(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1000, 500))
+	// Padding of 10% of the box width and 5% of its height, clamped to the picture.
+	if got := cropPerson(img, [4]float64{0.4, 0.2, 0.6, 1}).Bounds(); got != image.Rect(380, 80, 620, 500) {
+		t.Fatalf("crop = %v", got)
+	}
+}

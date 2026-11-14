@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"atelier/internal/ark"
+	"atelier/internal/profile"
 )
 
 //go:embed prompt.md
@@ -41,10 +42,13 @@ var imageStyle = map[string]struct{ size, suffix string }{
 }
 
 type Agent struct {
-	Ark        *ark.Client
-	TextModel  string
-	ImageModel string
-	Debug      bool // log every line the text model writes
+	Ark         *ark.Client
+	TextModel   string
+	ImageModel  string
+	VisionModel string         // looks at uploaded photos
+	Profile     *profile.Store // what is remembered about the user
+	pending     uploads        // pictures waiting for "this one is me"
+	Debug       bool           // log every line the text model writes
 }
 
 type turn struct {
@@ -107,7 +111,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	since := func() int64 { return time.Since(start).Milliseconds() }
 	out.send("meta", map[string]any{"text_model": a.TextModel, "image_model": a.ImageModel})
 
-	msgs := []ark.Message{{Role: "system", Content: systemPrompt}}
+	msgs := []ark.Message{{Role: "system", Content: systemPrompt + profileNote(a.Profile.Get())}}
 	for _, t := range req.History {
 		lines := make([]string, len(t.Ops))
 		for i, op := range t.Ops {
@@ -132,6 +136,24 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		}
 		op, ok := parseOp(line)
 		if !ok {
+			return
+		}
+		// A remembered preference is not part of the page: it is stored and
+		// the browser is only told, so the user can see it and take it back.
+		if op["t"] == "remember" {
+			var texts []string
+			if items, ok := op["items"].([]any); ok {
+				for _, it := range items {
+					if s, ok := it.(string); ok {
+						texts = append(texts, s)
+					}
+				}
+			}
+			if added, err := a.Profile.AddPrefs(texts); err != nil {
+				log.Printf("remember: %v", err)
+			} else if len(added) > 0 {
+				out.send("memory", map[string]any{"added": added, "profile": a.Profile.Get()})
+			}
 			return
 		}
 		id, _ := op["id"].(string)
@@ -176,9 +198,16 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			bgName, _ = op["bgName"].(string)
 		}
 		var refs []string
+		tryOn := false
 		if edit, _ := op["edit"].(bool); edit {
 			if ref := req.Images[id]; validRef(ref) {
 				refs = []string{ref}
+			}
+		}
+		// "me" dresses the user's own confirmed photo instead of an invented model.
+		if me, _ := op["me"].(bool); me && len(refs) == 0 && kind != "flatlay" && kind != "detail" {
+			if jpg, ok := a.Profile.MainPhoto(); ok {
+				refs, tryOn = []string{dataURL(jpg)}, true
 			}
 		}
 		wg.Add(1)
@@ -188,7 +217,10 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			t0 := time.Now()
 			full := prompt + " " + fmt.Sprintf(style.suffix, backdrop(bg, bgName))
-			if len(refs) > 0 {
+			switch {
+			case tryOn:
+				full = "Dress the person from the reference photo in this outfit: " + prompt + ". Keep their face, hair, skin tone and body shape exactly as in the reference photo; replace all clothing and the surroundings. " + fmt.Sprintf(style.suffix, backdrop(bg, bgName))
+			case len(refs) > 0:
 				full = prompt + " Keep the same backdrop colour."
 			}
 			u, err := a.Ark.Image(ictx, a.ImageModel, full, style.size, refs)

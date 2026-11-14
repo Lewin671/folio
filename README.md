@@ -21,10 +21,33 @@ typeface, with pictures generated to match.
    morphs matching blocks in place. An image block with `"edit": true` is
    regenerated from the previous picture, which keeps the person consistent.
 
+## Profile and memory
+
+The app has one user. What it remembers lives under `DATA_DIR` (default
+`./data`, mode 700): confirmed photos of the user, a one-line appearance note
+and stated preferences.
+
+- **Whose photo is it.** An uploaded picture goes to a vision model that boxes
+  every person in it. Only a person the user has confirmed is cropped out and
+  stored. A group photo always asks which one; a single person is accepted
+  without asking only when the model matches them to an already confirmed
+  photo with confidence of at least 0.9, and that is announced with an undo.
+  The thresholds and the reason are at the top of `internal/agent/photo.go`.
+- **Try-on.** With a photo on file the text model marks figure pictures with
+  `"me": true` and the main photo is sent as the reference image.
+- **Preferences.** The text model emits `{"t":"remember","items":[…]}` for
+  lasting facts; they are stored, shown as a toast with undo, and added to the
+  system prompt of later turns. Everything can be viewed and deleted in the
+  profile panel.
+
+Photos leave the machine only as requests to the Ark models. There is no
+login: anyone who can reach the server can see and change the profile.
+
 ## Run
 
 ```sh
 export ARK_API_KEY=...        # Volcengine Ark data-plane key
+# optional: TEXT_MODEL, IMAGE_MODEL, VISION_MODEL, DATA_DIR, ADDR
 make build && ./atelier       # http://127.0.0.1:8787
 ```
 
