@@ -23,16 +23,25 @@ type State = {
   history: Turn[];
   timing: Timing;
   error: string;
+  pages: Page[]; // every page made so far, oldest first
+  at: number; // which of them is showing; -1 is the cover
 };
 
-const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "" };
+/** A finished page, kept so the reader can leaf back to it. */
+type Page = { head: Head; blocks: Op[]; images: Record<string, Img>; history: Turn[] };
 
-type Action = { type: "start"; input: string; image?: string } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "reset" };
+const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "", pages: [], at: -1 };
+
+type Action = { type: "start"; input: string; image?: string } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "go"; to: number };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
-    case "reset":
-      return initial;
+    case "go": {
+      // Leafing to another page drops whatever was in progress; the pages themselves stay.
+      const page = s.pages[a.to];
+      if (!page) return { ...initial, pages: s.pages };
+      return { ...initial, pages: s.pages, at: a.to, head: page.head, blocks: page.blocks, images: page.images, history: page.history };
+    }
 
     case "start":
       return { ...s, busy: true, asking: a.input, attached: a.image ?? "", seen: "", error: "", timing: {}, turnOps: [], stale: new Set(s.blocks.map((b) => b.id)) };
@@ -43,7 +52,11 @@ function reducer(s: State, a: Action): State {
       for (const [id, img] of Object.entries(images)) if (img.pending) images[id] = { ...img, pending: false, failed: true };
       const ok = !a.failed && s.turnOps.length > 0;
       const history = ok ? [...s.history, { user: s.seen || a.input, ops: forHistory(s.turnOps) }].slice(-3) : s.history;
-      return { ...s, busy: false, asking: "", images, history, stale: new Set(), blocks: s.blocks.filter((b) => !s.stale.has(b.id)) };
+      const blocks = s.blocks.filter((b) => !s.stale.has(b.id));
+      // A new page goes after the one it was asked from; pages that came after that one are dropped.
+      const made = s.head && s.turnOps.length > 0;
+      const pages = made ? [...s.pages.slice(0, s.at + 1), { head: s.head!, blocks, images, history }] : s.pages;
+      return { ...s, busy: false, asking: "", images, history, stale: new Set(), blocks, pages, at: made ? pages.length - 1 : s.at };
     }
 
     case "event": {
@@ -104,6 +117,9 @@ function applyOp(s: State, op: Op): State {
   return { ...s, turnOps, asking: "", stale, blocks: [...fresh, op, ...old], images };
 }
 
+// Pages live in memory only, so browser history entries from before a reload point at nothing.
+const SESSION = Math.random().toString(36).slice(2);
+
 /** Resolves once the browser has the picture, so it can appear together with its colour field. */
 const preload = (url: string) =>
   new Promise<void>((resolve) => {
@@ -148,6 +164,38 @@ export function App() {
   useEffect(() => {
     api.profile().then(setProfile, () => {}); // without a server (offline fixtures) the profile just stays empty
     if (!MOCK) api.setup().then((r) => setProblems(r.problems ?? []), () => {});
+  }, []);
+
+  // Each page is a browser history entry, so the back button and the swipe
+  // gesture leaf through pages; the arrows in the top bar do the same.
+  // The entry is added when a question is sent, so going back while the page
+  // is still being made returns to the page it was asked from.
+  const entry = useRef(-1); // the page index the current browser entry stands for
+  const skipPop = useRef(false);
+  useEffect(() => {
+    const want = s.busy ? s.at + 1 : s.at;
+    if (want === entry.current) return;
+    if (!s.busy && entry.current === s.at + 1) {
+      // Nothing came of the question: step off the entry that was added for it.
+      skipPop.current = true;
+      entry.current = s.at;
+      history.back();
+      return;
+    }
+    entry.current = want;
+    history.pushState({ folio: SESSION, i: want }, "");
+  }, [s.at, s.busy]);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      if (skipPop.current) return void (skipPop.current = false);
+      const to = e.state?.folio === SESSION && state.current.pages[e.state.i] ? (e.state.i as number) : -1;
+      entry.current = to;
+      abort.current?.abort();
+      dispatch({ type: "go", to });
+      window.scrollTo({ top: 0 });
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   function toast(text: string, undo?: () => void) {
@@ -199,9 +247,10 @@ export function App() {
     if (!ctl.signal.aborted) dispatch({ type: "finish", input, failed });
   }
 
-  function reset() {
+  function home() {
     abort.current?.abort();
-    dispatch({ type: "reset" });
+    if (entry.current >= 0 && !s.busy) history.go(-(entry.current + 1));
+    else dispatch({ type: "go", to: -1 });
   }
 
   const waitingFirst = s.busy && !!s.asking;
@@ -217,9 +266,24 @@ export function App() {
       <div className="glow" aria-hidden />
 
       <nav className="top">
-        <button type="button" className="brand" onClick={reset} title="回到开始">
-          Folio
-        </button>
+        <span className="top-left">
+          <button type="button" className="brand" onClick={home} title="回到封面">
+            Folio
+          </button>
+          {s.at >= 0 && s.pages.length > 1 && (
+            <span className="pager">
+              <button type="button" onClick={() => history.back()} disabled={s.at === 0 && !s.busy} aria-label="上一页" title="上一页">
+                ←
+              </button>
+              <span className="pager-n">
+                {s.at + 1} / {s.pages.length}
+              </span>
+              <button type="button" onClick={() => history.forward()} disabled={s.busy || s.at >= s.pages.length - 1} aria-label="下一页" title="下一页">
+                →
+              </button>
+            </span>
+          )}
+        </span>
         <span className="top-right">
           {(s.timing.first || s.busy) && (
             <button type="button" className="timing" onClick={() => setShowTiming((v) => !v)} title="各阶段耗时，点击收起或展开">
@@ -227,6 +291,11 @@ export function App() {
             </button>
           )}
           {MOCK && <span className="mock-flag">假数据</span>}
+          {s.at < 0 && !s.busy && s.pages.length > 0 && (
+            <button type="button" className="profile-btn" onClick={() => history.forward()} aria-label="下一页">
+              回到刚才那页 →
+            </button>
+          )}
           <button type="button" className="profile-btn" onClick={() => setPanel(true)}>
             档案
           </button>
