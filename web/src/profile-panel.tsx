@@ -2,6 +2,7 @@ import { useState } from "react";
 import { m } from "motion/react";
 import { api, type Profile } from "./profile";
 import { T } from "./i18n";
+import { sheetMotion } from "./sheet";
 
 type PanelProps = { profile: Profile; onChange: (p: Profile) => void; onClose: () => void };
 
@@ -12,12 +13,10 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
 
   return (
     <m.div className="sheet-scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <m.aside className="panel" role="dialog" aria-modal aria-label={T.memory} initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} onClick={(e) => e.stopPropagation()}>
+      <m.aside className="panel" role="dialog" aria-modal aria-label={T.memory} {...sheetMotion} onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>{T.memory}</h2>
-          <button type="button" onClick={onClose}>
-            {T.close}
-          </button>
+          <button type="button" className="sheet-close" onClick={onClose} aria-label={T.close} title={T.close} />
         </header>
 
         <section>

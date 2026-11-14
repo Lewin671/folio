@@ -448,13 +448,13 @@ export function App() {
           {s.at >= 0 && s.pages.length > 1 && (
             <span className="pager">
               <button type="button" onClick={() => show(s.busy ? s.at : s.at - 1)} disabled={s.at === 0 && !s.busy} aria-label={T.prev} title={T.prev}>
-                ←
+                <span className="chev is-back" aria-hidden />
               </button>
               <span className="pager-n">
                 {s.at + 1} / {s.pages.length}
               </span>
               <button type="button" onClick={() => show(s.at + 1)} disabled={s.busy || s.at >= s.pages.length - 1} aria-label={T.next} title={T.next}>
-                →
+                <span className="chev" aria-hidden />
               </button>
             </span>
           )}
@@ -514,11 +514,11 @@ export function App() {
                 <section>
                   <h2 className="cover-label">{T.tryLabel}</h2>
                   <ul className="cover-lines">
-                    {SUGGESTIONS.slice(0, shown.length ? 3 : 6).map((q) => (
+                    {SUGGESTIONS.slice(0, shown.length ? 3 : 4).map((q) => (
                       <li key={q}>
                         <button type="button" onClick={() => say(q)}>
                           {q}
-                          <span className="go" aria-hidden>→</span>
+                          <span className="chev" aria-hidden />
                         </button>
                       </li>
                     ))}
@@ -531,6 +531,7 @@ export function App() {
                       {!MOCK && (
                         <button type="button" onClick={() => setPanel("history")}>
                           {T.allHistory}
+                          <span className="chev" aria-hidden />
                         </button>
                       )}
                     </h2>

@@ -245,7 +245,7 @@ const Parts = ({ op, onSay, busy }: BlockProps) => (
             <span className="part-name">{str(it.name)}</span>
             {str(it.note) && <span className="part-note">{str(it.note)}</span>}
           </span>
-          <span className="part-more">{T.moreLabel}</span>
+          <span className="chev" aria-label={T.moreLabel} />
         </button>
       </li>
     ))}
@@ -396,7 +396,8 @@ function Quiz({ op }: { op: Op }) {
         {options.map((o, i) => (
           <button type="button" key={i} disabled={picked !== null} className={picked === null ? "" : i === answer ? "is-right" : i === picked ? "is-wrong" : "is-rest"} onClick={() => setPicked(i)}>
             <span className="quiz-key">{"ABCD"[i]}</span>
-            {str(o)}
+            <span className="quiz-text">{str(o)}</span>
+            <span className="quiz-mark" aria-hidden />
           </button>
         ))}
       </div>

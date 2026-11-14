@@ -13,7 +13,7 @@ type Props = {
   busy: boolean;
   asking: boolean;
   hasHead: boolean;
-  /** On the cover the question is set as a headline in the page; elsewhere the input is a bar at the foot. */
+  /** On the cover the input sits in the page, larger; elsewhere it is a bar at the foot. */
   cover: boolean;
   error: string;
   onSend: (text: string, image?: string) => boolean;
@@ -22,14 +22,7 @@ type Props = {
   onToast: (text: string) => void;
 };
 
-const icon = { width: 18, height: 18, viewBox: "0 0 18 18", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
-
-/** A headline that runs long is set smaller, so the cover keeps its shape. Latin letters count as half. */
-function lengthOf(text: string) {
-  let n = 0;
-  for (const ch of text) n += ch.charCodeAt(0) > 0x2e7f ? 1 : 0.5;
-  return n <= 12 ? "s" : n <= 26 ? "m" : "l";
-}
+const icon = { width: 18, height: 18, viewBox: "0 0 18 18", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
 export const Composer = memo(function Composer({ ref, busy, asking, hasHead, cover, error, onSend, onStop, onToast }: Props) {
   const [draft, setDraft] = useState("");
@@ -146,17 +139,15 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, cov
   const empty = !draft.trim() && !attach;
   return (
     <div className="dock">
-      <form className={`composer len-${lengthOf(draft)} ${dropping ? "is-dropping" : ""}`} onSubmit={(e) => { e.preventDefault(); submit(draft); }}
+      <form className={`composer ${dropping ? "is-dropping" : ""}`} onSubmit={(e) => { e.preventDefault(); submit(draft); }}
         onClick={(e) => { if (e.target === e.currentTarget) box.current?.focus(); }}>
         {attach ? (
           <button type="button" className="attach has-image" onClick={() => { picking.current++; setAttach(""); }} aria-label={T.removePic} title={T.removePic}>
             <img src={attach} alt="" />
-            <span className="attach-label">{T.removePic}</span>
           </button>
         ) : (
           <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label={T.addPic} title={T.addPicTitle}>
             <svg {...icon}><path d="M9 3.5v11M3.5 9h11" /></svg>
-            <span className="attach-label">{T.addPic}</span>
           </button>
         )}
         <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => {
@@ -172,7 +163,7 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, cov
           }
         }} placeholder={busy ? (asking ? T.phMaking : T.phPictures) : attach ? T.phWithPic : hasHead ? T.phFollow : T.phFirst}
           maxLength={400} aria-label={T.inputLabel} enterKeyHint="enter" />
-        {!empty && !busy && <kbd className="send-key" aria-hidden>{SEND_KEY}<span> {T.sendHint}</span></kbd>}
+        {!empty && !busy && <kbd className="send-key" aria-hidden>{SEND_KEY}</kbd>}
         {busy ? (
           <button type="button" className="send is-stop" onClick={() => { const asked = onStop(); if (asked && !draft) setDraft(asked); }} aria-label={T.stop} title={T.stop}>
             <svg {...icon}><rect x="5" y="5" width="8" height="8" rx="1" fill="currentColor" stroke="none" /></svg>
