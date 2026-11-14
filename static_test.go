@@ -41,6 +41,8 @@ func TestStaticAssets(t *testing.T) {
 		{"/assets/main.css", "gzip", "public, max-age=31536000, immutable", true},
 		{"/pics/cover.png", "gzip", "public, max-age=86400", false},
 		{"/", "gzip", "no-cache", true},
+		{"/c/abc123", "gzip", "no-cache", true},
+		{"/c/abc123/2?timing&lang=zh", "gzip", "no-cache", true},
 	} {
 		r := httptest.NewRequest("GET", tc.path, nil)
 		r.Header.Set("Accept-Encoding", tc.encoding)
@@ -103,6 +105,36 @@ func TestStaticAssets(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/index.html", nil))
 	if w.Code != 301 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestConversationFallback(t *testing.T) {
+	const index = "<html>Folio</html>"
+	h, err := staticHandler(fstest.MapFS{"index.html": {Data: []byte(index)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := httptest.NewRecorder()
+	h.ServeHTTP(root, httptest.NewRequest("GET", "/", nil))
+	// Even malformed conversation links reach the app so it can show the cover.
+	for _, path := range []string{"/c/abc123", "/c/abc123/3?timing&lang=zh", "/c/missing", "/c/", "/c/abc123/index.html"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != http.StatusOK || w.Body.String() != index {
+			t.Fatalf("%s: %d %q", path, w.Code, w.Body.String())
+		}
+		for _, key := range []string{"Cache-Control", "Content-Type", "ETag", "Vary", "Content-Length"} {
+			if got, want := w.Header().Get(key), root.Header().Get(key); got != want {
+				t.Errorf("%s: %s = %q, want %q", path, key, got, want)
+			}
+		}
+	}
+	for _, path := range []string{"/missing", "/c", "/conversation/abc123", "/assets/missing.js"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404", path, w.Code)
+		}
 	}
 }
 

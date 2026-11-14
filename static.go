@@ -52,11 +52,12 @@ func staticHandler(web fs.FS) (http.Handler, error) {
 	fallback := http.FileServerFS(web)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := path.Clean("/" + r.URL.Path)
-		if name == "/" {
+		conversation := strings.HasPrefix(r.URL.Path, "/c/")
+		if name == "/" || conversation {
 			name = "/index.html"
 		}
 		// Preserve FileServer's canonical redirect for explicit index.html URLs.
-		if strings.HasSuffix(r.URL.Path, "/index.html") {
+		if !conversation && strings.HasSuffix(r.URL.Path, "/index.html") {
 			w.Header().Set("Cache-Control", "no-cache")
 			fallback.ServeHTTP(w, r)
 			return

@@ -8,6 +8,7 @@ import { COVERS } from "./covers";
 import { api, EMPTY, Toasts, type Profile, type ThreadMeta, type Toast } from "./profile";
 import { Composer, type ComposerHandle } from "./composer";
 import { createThreadSaver } from "./thread-saver";
+import { parseRoute, routeURL, type Route } from "./route";
 import { switchLang, T } from "./i18n";
 
 const ProfilePanel = lazy(() => import("./profile-panel").then((m) => ({ default: m.ProfilePanel })));
@@ -149,6 +150,12 @@ const SHOW_TIMING = new URLSearchParams(location.search).has("timing");
 const newThread = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n) + "…" : text);
 
+function record(entry: Route, replace = false) {
+  const url = routeURL(entry, location.search);
+  if (replace || url === location.pathname + location.search) history.replaceState(entry, "", url);
+  else history.pushState(entry, "", url);
+}
+
 /** Resolves once the browser has the picture, so it can appear together with its colour field. */
 const preload = (url: string) =>
   new Promise<void>((resolve) => {
@@ -176,6 +183,10 @@ export function App() {
   const abort = useRef<AbortController | null>(null);
   const state = useRef(s);
   state.current = s;
+
+  useEffect(() => {
+    document.title = s.head?.title ? `${s.head.title} · Folio` : "Folio";
+  }, [s.head?.title]);
 
   const stage = useMemo(() => (s.head ? stageOf(s.head, s.blocks) : null), [s.head, s.blocks]);
 
@@ -205,9 +216,10 @@ export function App() {
   // reload or a later visit to the same entry opens that page again.
   const pending = useRef(false); // the current entry stands for a page still being made
   const skipPop = useRef(false);
-  function enter(entry: { th?: string; i: number }) {
-    if (pending.current) history.replaceState(entry, "");
-    else history.pushState(entry, "");
+  const navigation = useRef(0); // a late server reply must not undo a newer move
+  function enter(entry: Route) {
+    navigation.current++;
+    record(entry, pending.current);
     pending.current = false;
   }
   function show(to: number) {
@@ -216,23 +228,40 @@ export function App() {
     dispatch({ type: "go", to });
     window.scrollTo({ top: 0 });
   }
-  function restore(entry: any) {
+  function restore(entry: Route | null) {
+    const visit = ++navigation.current;
     const cur = state.current;
-    const i = typeof entry?.i === "number" ? entry.i : -1;
-    if (i < 0 || typeof entry?.th !== "string") return dispatch({ type: "go", to: -1 });
-    if (entry.th === cur.thread && cur.pages.length) return dispatch({ type: "go", to: Math.min(i, cur.pages.length - 1) });
-    api.thread(entry.th).then(
-      (t) => dispatch({ type: "open", thread: t.id, pages: t.pages, to: Math.min(i, t.pages.length - 1) }),
-      () => dispatch({ type: "go", to: -1 }),
-    );
+    const cover = (failed = false) => {
+      record({ i: -1 }, true);
+      dispatch({ type: "go", to: -1 });
+      if (failed) toast(T.cantOpen);
+    };
+    if (!entry) return cover(true);
+    const { th, i } = entry;
+    if (!th || i < 0) return cover();
+    if (th === cur.thread && cur.pages.length) {
+      const to = Math.min(i, cur.pages.length - 1);
+      record({ th, i: to }, true);
+      return dispatch({ type: "go", to });
+    }
+    if (MOCK) return cover();
+    api.thread(th).then((t) => {
+      if (visit !== navigation.current) return;
+      if (!t.pages.length) return cover(true);
+      const to = Math.min(i, t.pages.length - 1);
+      record({ th: t.id, i: to }, true);
+      dispatch({ type: "open", thread: t.id, pages: t.pages, to });
+    }, () => {
+      if (visit === navigation.current) cover(true);
+    });
   }
   useEffect(() => {
-    if (!MOCK) restore(history.state);
-    const onPop = (e: PopStateEvent) => {
+    if (!MOCK) restore(parseRoute(location.pathname));
+    const onPop = () => {
       if (skipPop.current) return void (skipPop.current = false);
       cancel();
       pending.current = false;
-      restore(e.state);
+      restore(parseRoute(location.pathname));
       window.scrollTo({ top: 0 });
     };
     window.addEventListener("popstate", onPop);
@@ -275,6 +304,7 @@ export function App() {
   }, [s.rev]);
   /** Stops the page being made. Its saved draft gives way to the pages that were finished. */
   function cancel() {
+    navigation.current++;
     abort.current?.abort();
     const cur = state.current;
     if (cur.busy && unfinished.current === cur.thread) {
@@ -294,7 +324,9 @@ export function App() {
     // The page being made gets its browser entry now, so going back while it
     // is still being made returns to the page it was asked from.
     const thread = cur.at < 0 || !cur.thread ? newThread() : cur.thread;
-    history.pushState({ th: thread, i: cur.at < 0 ? 0 : cur.at + 1 }, "");
+    const entry = { th: thread, i: cur.at < 0 ? 0 : cur.at + 1 };
+    navigation.current++;
+    record(entry);
     pending.current = true;
     let made = false;
     let placed = cur.at >= 0; // blocks can only be placed once there is a scene
@@ -329,6 +361,7 @@ export function App() {
       abort.current = null;
       dispatch({ type: "finish", input, failed });
       pending.current = false;
+      record(made ? entry : { th: cur.thread, i: cur.at }, true);
       if (!made) {
         // Nothing came of the question: step off the entry that was added for it.
         skipPop.current = true;
@@ -342,16 +375,20 @@ export function App() {
   const resume = () => (recent && recent.id === s.thread && s.pages.length ? show(s.pages.length - 1) : recent && openThread(recent.id));
 
   async function openThread(id: string) {
+    const visit = ++navigation.current;
     try {
       const t = await api.thread(id);
+      if (visit !== navigation.current) return;
       const to = t.pages.length - 1;
+      if (to < 0) throw new Error(T.cantOpen);
       cancel();
       enter({ th: t.id, i: to });
       dispatch({ type: "open", thread: t.id, pages: t.pages, to });
       window.scrollTo({ top: 0 });
       setPanel("");
     } catch (e: any) {
-      toast(String(e?.message ?? T.cantOpen));
+      // The page that was showing stays; only the failure is reported.
+      if (visit === navigation.current) toast(String(e?.message ?? T.cantOpen));
     }
   }
 
