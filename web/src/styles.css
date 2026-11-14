@@ -1,9 +1,7 @@
-/* Text and accent are registered so a change of scene animates everywhere at once. */
-@property --ink { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
-@property --accent { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
-@property --flat { syntax: "<color>"; inherits: true; initial-value: #14110f; }
-
 :root {
+  --ink: #ffffff;
+  --accent: #ffffff;
+  --flat: #14110f;
   --on-accent: #161412;
   --soft: color-mix(in srgb, var(--ink) 74%, transparent);
   --faint: color-mix(in srgb, var(--ink) 50%, transparent);
@@ -15,7 +13,6 @@
   --dw: 900;
   --track: -0.01em;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  transition: --ink 0.8s ease, --accent 0.8s ease, --flat 0.8s ease;
 }
 
 * { box-sizing: border-box; }
@@ -44,6 +41,8 @@ ul, ol { list-style: none; }
   --glow: var(--accent);
   position: relative;
   min-height: 100dvh;
+  color: var(--ink);
+  transition: color 0.3s ease;
 }
 .app.hero-square {
   --hero-h: min(100dvh - var(--dock-h) - 150px, 46vw);
@@ -59,8 +58,13 @@ ul, ol { list-style: none; }
 .glow {
   position: fixed; left: 50%; bottom: -190px; z-index: 4;
   width: min(1100px, 96vw); height: 340px; translate: -50% 0;
-  background: radial-gradient(closest-side, var(--glow), transparent);
-  filter: blur(36px); opacity: 0; pointer-events: none;
+  background: radial-gradient(ellipse closest-side,
+    color-mix(in srgb, var(--glow) 80%, transparent) 0%,
+    color-mix(in srgb, var(--glow) 66%, transparent) 20%,
+    color-mix(in srgb, var(--glow) 42%, transparent) 42%,
+    color-mix(in srgb, var(--glow) 19%, transparent) 65%,
+    color-mix(in srgb, var(--glow) 5%, transparent) 85%, transparent 100%);
+  opacity: 0; pointer-events: none; will-change: transform, opacity;
   transition: opacity 0.9s ease;
 }
 .is-busy .glow { opacity: 0.4; animation: breathe 2.6s ease-in-out infinite; }
@@ -219,8 +223,12 @@ ul, ol { list-style: none; }
 .figure.is-waiting .figure-imgs { filter: blur(14px) saturate(0.8); opacity: 0.72; }
 .figure-ghost {
   position: absolute; inset: 12% 24% 6%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--tile-ink, var(--ink)) 26%, transparent), transparent);
-  filter: blur(26px); animation: ghost 2.8s ease-in-out infinite;
+  background: radial-gradient(ellipse closest-side,
+    color-mix(in srgb, var(--tile-ink, var(--ink)) 22%, transparent) 0%,
+    color-mix(in srgb, var(--tile-ink, var(--ink)) 18%, transparent) 22%,
+    color-mix(in srgb, var(--tile-ink, var(--ink)) 11%, transparent) 46%,
+    color-mix(in srgb, var(--tile-ink, var(--ink)) 4%, transparent) 72%, transparent 100%);
+  animation: ghost 2.8s ease-in-out infinite; will-change: transform, opacity;
 }
 @keyframes ghost { 0%, 100% { opacity: 0.45; scale: 0.94 0.97; } 50% { opacity: 1; scale: 1.04; } }
 .figure figcaption {
@@ -305,6 +313,10 @@ ul, ol { list-style: none; }
 
 .is-stale { opacity: 0.32; filter: blur(3px); transition: opacity 0.4s, filter 0.4s; }
 .hero.is-stale { filter: blur(10px); }
+
+/* Local layout/style work stays within leaves; gallery sticky and card 3D
+   ancestors remain uncontained. No paint containment, which would flatten 3D. */
+.block, .tile, .panel { contain: layout style; }
 
 /* ---------- blocks ---------- */
 .text { font-size: clamp(17px, 1.4vw, 21px); line-height: 1.65; color: var(--soft); max-width: 30em; text-wrap: pretty; }
@@ -407,31 +419,41 @@ blockquote::before { content: "“"; display: block; height: 0.5em; font: 900 2.
 
 /* ---------- dock ---------- */
 .dock {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; height: var(--dock-h);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; min-height: var(--dock-h);
+  padding: 17px 0 calc(17px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; pointer-events: none;
 }
 /* Long pages dissolve into the field before they reach the input. */
 .dock::before {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--dock-h) + 36px); z-index: -1;
+  content: ""; position: absolute; inset: -36px 0 0 0; height: auto; z-index: -1;
   background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--flat) 88%, transparent) 62%);
   pointer-events: none;
 }
 .tpl-bands .dock::before { display: none; }
 .dock > * { pointer-events: auto; }
-.error { position: absolute; bottom: calc(100% + 4px); font-size: 14px; padding: 9px 18px; border-radius: 99px; background: #1a1614; color: #fff; }
+.error { position: absolute; bottom: calc(100% - 6px); max-width: calc(100vw - 32px); text-align: center; overflow-wrap: anywhere; font-size: 14px; padding: 9px 18px; border-radius: 22px; background: #1a1614; color: #fff; }
 .composer {
-  display: flex; align-items: flex-end; gap: 12px; width: min(540px, calc(100vw - 32px)); min-height: 54px; padding: 8px;
+  display: flex; flex: none; align-items: flex-end; gap: 12px; width: min(540px, calc(100vw - 32px)); min-height: 54px; padding: 8px;
   border-radius: 27px; color: var(--ink);
   background: linear-gradient(var(--glass), var(--glass)), color-mix(in srgb, var(--flat) 58%, transparent);
   box-shadow: inset 0 0 0 1px var(--line), 0 12px 40px -12px rgba(0, 0, 0, 0.35);
   -webkit-backdrop-filter: blur(28px) saturate(1.4); backdrop-filter: blur(28px) saturate(1.4);
 }
+.composer:focus-within { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 45%, transparent), 0 12px 40px -12px rgba(0, 0, 0, 0.35); }
 .orb { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
 .is-busy .orb { animation: orb 1.3s ease-in-out infinite; }
 @keyframes orb { 50% { scale: 1.7; opacity: 0.55; } }
-.composer textarea { flex: 1; min-width: 0; margin: 0; padding: 7px 0; border: 0; background: none; outline: none; resize: none; font: inherit; font-size: 16px; line-height: 24px; color: inherit; }
+.composer textarea {
+  field-sizing: content; min-height: 24px; max-height: 120px; overflow-y: auto; overscroll-behavior: contain;
+  flex: 1; min-width: 0; margin: 7px 0; padding: 0; border: 0; background: none; outline: none; resize: none;
+  font: inherit; font-size: 16px; line-height: 24px; color: inherit;
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 32%, transparent) transparent;
+}
+.composer textarea::-webkit-scrollbar { width: 5px; }
+.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.composer textarea::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 28%, transparent); border-radius: 99px; }
 .composer textarea::placeholder { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.send-key { flex: none; align-self: center; font: 12px/1 var(--sans); letter-spacing: 0.06em; color: var(--faint); white-space: nowrap; }
+.send-key { flex: none; align-self: flex-end; height: 38px; display: inline-flex; align-items: center; font: 12px/1 var(--sans); letter-spacing: 0.06em; color: var(--faint); white-space: nowrap; }
 @media (hover: none) { .send-key { display: none; } }
 .composer .send { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: var(--ink); color: var(--flat); transition: opacity 0.3s, scale 0.3s var(--ease); }
 .composer .send:disabled { opacity: 0.22; }

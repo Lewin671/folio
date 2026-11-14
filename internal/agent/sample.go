@@ -5,12 +5,12 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
@@ -19,8 +19,16 @@ const backdropStops = 6
 
 var (
 	hexRe      = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-	sampleHTTP = &http.Client{Timeout: 8 * time.Second}
+	sampleHTTP = newSampleHTTP()
 )
+
+func newSampleHTTP() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConns = 64
+	tr.MaxIdleConnsPerHost = 16
+	tr.IdleConnTimeout = 90 * time.Second
+	return &http.Client{Timeout: 8 * time.Second, Transport: tr}
+}
 
 // backdrop describes the studio paper colour for an image prompt. The page is
 // later painted in the colour the picture actually came out with, so the
@@ -95,24 +103,62 @@ func edgeStops(img image.Image, n int) []string {
 	stops := make([]string, n)
 	for i := range n {
 		cy := b.Min.Y + (2*i+1)*h/(2*n)
-		var rs, gs, bs []int
-		for y := max(cy-band, b.Min.Y); y < min(cy+band, b.Max.Y); y += 2 {
-			for dx := 0; dx < strip; dx += 2 {
-				for _, x := range [2]int{b.Min.X + dx, b.Max.X - 1 - dx} {
-					r, g, bl, _ := img.At(x, y).RGBA()
-					rs, gs, bs = append(rs, int(r>>8)), append(gs, int(g>>8)), append(bs, int(bl>>8))
-				}
-			}
-		}
-		stops[i] = fmt.Sprintf("#%02x%02x%02x", median(rs), median(gs), median(bs))
+		rgb := edgeMedian(img, strip, max(cy-band, b.Min.Y), min(cy+band, b.Max.Y))
+		const hex = "0123456789abcdef"
+		text := [7]byte{'#', hex[rgb[0]>>4], hex[rgb[0]&15], hex[rgb[1]>>4], hex[rgb[1]&15], hex[rgb[2]>>4], hex[rgb[2]&15]}
+		stops[i] = string(text[:])
 	}
+
 	return stops
 }
 
-func median(v []int) int {
-	if len(v) == 0 {
-		return 0
+// edgeMedian uses fixed histograms: sampling itself allocates no memory.
+func edgeMedian(img image.Image, strip, y0, y1 int) [3]uint8 {
+	var hist [3][256]uint32
+	var count uint32
+	b := img.Bounds()
+	for y := y0; y < y1; y += 2 {
+		for dx := 0; dx < strip; dx += 2 {
+			for _, x := range [2]int{b.Min.X + dx, b.Max.X - 1 - dx} {
+				r, g, bl := edgePixel(img, x, y)
+				hist[0][r]++
+				hist[1][g]++
+				hist[2][bl]++
+				count++
+			}
+		}
 	}
-	sort.Ints(v)
-	return v[len(v)/2]
+	var rgb [3]uint8
+	if count == 0 {
+		return rgb
+	}
+	for channel := range hist {
+		var cumulative uint32
+		for value, n := range hist[channel] {
+			cumulative += n
+			if cumulative > count/2 {
+				rgb[channel] = uint8(value)
+				break
+			}
+		}
+	}
+	return rgb
+}
+
+func edgePixel(img image.Image, x, y int) (uint8, uint8, uint8) {
+	switch p := img.(type) {
+	case *image.YCbCr:
+		yi, ci := p.YOffset(x, y), p.COffset(x, y)
+		return color.YCbCrToRGB(p.Y[yi], p.Cb[ci], p.Cr[ci])
+	case *image.RGBA:
+		i := p.PixOffset(x, y)
+		return p.Pix[i], p.Pix[i+1], p.Pix[i+2]
+	case *image.NRGBA:
+		i := p.PixOffset(x, y)
+		a := uint32(p.Pix[i+3])
+		return uint8((uint32(p.Pix[i]) * 0x101 * a / 0xff) >> 8), uint8((uint32(p.Pix[i+1]) * 0x101 * a / 0xff) >> 8), uint8((uint32(p.Pix[i+2]) * 0x101 * a / 0xff) >> 8)
+	default:
+		r, g, b, _ := img.At(x, y).RGBA()
+		return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)
+	}
 }

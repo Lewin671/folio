@@ -7,6 +7,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -58,6 +59,7 @@ type Agent struct {
 	Profile     *profile.Store // what is remembered about the user
 	Library     *library.Store // earlier pages and their pictures
 	Debug       bool           // log every line the text model writes
+	setup       setupCache
 }
 
 type turn struct {
@@ -137,8 +139,28 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	// words; the browser keeps those words as part of the question for later turns.
 	question := req.Input
 	if req.Image != "" {
-		seen, err := a.look(ctx, req.Image, lang)
+		raw, err := decodeUpload(req.Image)
+		var seen, kept string
+		if err == nil {
+			type savedUpload struct {
+				url string
+				err error
+			}
+			saved := make(chan savedUpload, 1)
+			go func() { u, e := a.Library.SaveImage(raw); saved <- savedUpload{u, e} }()
+			seen, err = a.describe(ctx, req.Image, lang)
+			stored := <-saved
+			kept = stored.url
+			if stored.err != nil {
+				log.Printf("keep upload: %v", stored.err)
+			}
+		}
 		if err != nil {
+			if kept != "" {
+				if cleanupErr := a.Library.DiscardImage(kept); cleanupErr != nil {
+					log.Printf("discard upload: %v", cleanupErr)
+				}
+			}
 			log.Printf("look: %v", err)
 			msg := ark.Hint(err, lang)
 			if msg == "" {
@@ -150,10 +172,6 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		}
 		question = fmt.Sprintf(say(lang, "%s\n\n(The user attached a picture. It shows: %s)", "%s\n\n（用户附了一张图片。图片里是：%s）"), req.Input, seen)
 		// The picture is kept so the page still shows it when reopened later.
-		kept, err := a.keepUpload(req.Image)
-		if err != nil {
-			log.Printf("keep upload: %v", err)
-		}
 		out.send("seen", map[string]any{"text": question, "url": kept})
 	}
 	msgs = append(msgs, ark.Message{Role: "user", Content: question})
@@ -239,15 +257,16 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			bg = own
 			bgName, _ = op["bgName"].(string)
 		}
-		var refs []string
-		if edit, _ := op["edit"].(bool); edit {
-			if ref := a.editRef(req.Images[id]); ref != "" {
-				refs = []string{ref}
-			}
-		}
+		edit, _ := op["edit"].(bool)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			var refs []string
+			if edit {
+				if ref := a.editRef(req.Images[id]); ref != "" {
+					refs = []string{ref}
+				}
+			}
 			ictx, cancel := context.WithTimeout(ctx, imageTimeout)
 			defer cancel()
 			t0 := time.Now()
@@ -256,6 +275,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 				full = prompt + " Keep everything else, including the backdrop colour, the same."
 			}
 			u, err := a.Ark.Image(ictx, a.ImageModel, full, style.size, refs)
+			a.invalidateSetup(err)
 			if err != nil {
 				log.Printf("image %s: %v", id, err)
 				out.send("image_error", map[string]any{"id": id})
@@ -289,6 +309,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			handle(line)
 		}
 	})
+	a.invalidateSetup(err)
 	if rest := lines.flush(); rest != "" {
 		handle(rest)
 	}
@@ -313,23 +334,31 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 }
 
 // lineBuffer splits a token stream into complete lines.
-type lineBuffer struct{ buf strings.Builder }
+type lineBuffer struct{ buf []byte }
 
 func (l *lineBuffer) feed(delta string) []string {
-	l.buf.WriteString(delta)
-	s := l.buf.String()
-	i := strings.LastIndexByte(s, '\n')
-	if i < 0 {
-		return nil
+	start := len(l.buf)
+	l.buf = append(l.buf, delta...)
+	var lines []string
+	consumed := 0
+	for {
+		i := bytes.IndexByte(l.buf[start:], '\n')
+		if i < 0 {
+			break
+		}
+		end := start + i
+		lines = append(lines, string(l.buf[consumed:end]))
+		consumed, start = end+1, end+1
 	}
-	l.buf.Reset()
-	l.buf.WriteString(s[i+1:])
-	return strings.Split(s[:i], "\n")
+	if consumed > 0 {
+		l.buf = l.buf[:copy(l.buf, l.buf[consumed:])]
+	}
+	return lines
 }
 
 func (l *lineBuffer) flush() string {
-	s := l.buf.String()
-	l.buf.Reset()
+	s := string(l.buf)
+	l.buf = l.buf[:0]
 	return s
 }
 

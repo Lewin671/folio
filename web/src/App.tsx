@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { AnimatePresence, LayoutGroup, m } from "motion/react";
 import type { Head, Img, Op, StreamEvent, Timing, Turn } from "./types";
 import { forHistory, MOCK, runTurn } from "./stream";
 import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
 import { COVERS } from "./covers";
-import { api, EMPTY, ProfilePanel, Toasts, toJpeg, type Profile, type ThreadMeta, type Toast } from "./profile";
-import { HistoryPanel } from "./history";
+import { api, EMPTY, Toasts, type Profile, type ThreadMeta, type Toast } from "./profile";
+import { Composer, type ComposerHandle } from "./composer";
+import { createThreadSaver } from "./thread-saver";
 import { switchLang, T } from "./i18n";
+
+const ProfilePanel = lazy(() => import("./profile-panel").then((m) => ({ default: m.ProfilePanel })));
+const HistoryPanel = lazy(() => import("./history").then((m) => ({ default: m.HistoryPanel })));
 
 // Shown on the cover as headlines; each leads to a different kind of page.
 const SUGGESTIONS = T.suggestions;
@@ -142,7 +146,6 @@ function applyOp(s: State, op: Op): State {
 
 // Timings are for whoever is tuning the models; add ?timing to the address to see them.
 const SHOW_TIMING = new URLSearchParams(location.search).has("timing");
-const SEND_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ ↵" : "Ctrl ↵";
 const newThread = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n) + "…" : text);
 
@@ -150,13 +153,16 @@ const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n) + 
 const preload = (url: string) =>
   new Promise<void>((resolve) => {
     const im = new Image();
-    im.onload = im.onerror = () => resolve();
+    im.onerror = () => resolve();
+    im.onload = async () => {
+      await im.decode?.().catch(() => {});
+      resolve();
+    };
     im.src = url;
   });
 
 export function App() {
   const [s, dispatch] = useReducer(reducer, initial);
-  const [draft, setDraft] = useState("");
   const [showTiming, setShowTiming] = useState(false);
   // The home screen is a magazine cover: one of the shipped pictures on its own backdrop.
   const [cover] = useState(() => COVERS[Math.floor(Math.random() * COVERS.length)]);
@@ -164,17 +170,9 @@ export function App() {
   const [problems, setProblems] = useState<string[]>([]); // what is missing in the setup, if anything
   const [panel, setPanel] = useState<"" | "memory" | "history">("");
   const [recent, setRecent] = useState<ThreadMeta | null>(null); // the latest conversation, offered on the cover
-  const [attach, setAttach] = useState(""); // a picture waiting to be sent with the next question
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const picker = useRef<HTMLInputElement>(null);
-  const box = useRef<HTMLTextAreaElement>(null);
-  // The box grows with what is typed, up to a few lines.
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 132) + "px";
-  }, [draft]);
+  const composer = useRef<ComposerHandle>(null);
+  const say = useCallback((text: string) => composer.current?.submit(text), []);
   const abort = useRef<AbortController | null>(null);
   const state = useRef(s);
   state.current = s;
@@ -241,22 +239,31 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  const toast = useCallback((text: string, undo?: () => void) => {
+    const id = Date.now() + Math.random();
+    setToasts((ts) => [...ts.slice(-2), { id, text, undo }]);
+    window.setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 7000);
+  }, []);
+
   // The conversation is saved on the server as soon as a page has a title,
   // again when its text is complete and as each picture arrives, so it is in
   // the history even if the reader leaves before the page is finished.
-  const saving = useRef<Promise<unknown>>(Promise.resolve()); // saves go out one at a time, in order
+  const [saving] = useState(() => createThreadSaver(
+    async (id: string, pages: Page[]) => {
+      const first = pages[0];
+      const title = first.head.title || clip(first.history[first.history.length - 1]?.user ?? "", 40);
+      const img = Object.values(first.images).find((im) => im.url?.startsWith("/api/img/"))?.url;
+      await api.saveThread(id, { title, bg: first.head.bg, img }, pages);
+      setRecent({ id, title, updated: new Date().toISOString(), count: pages.length });
+    },
+    api.deleteThread,
+    () => toast(T.notSaved),
+  ));
   const unfinished = useRef(""); // the conversation whose saved copy includes an unfinished page
-  function save(id: string, pages: Page[]) {
-    const first = pages[0];
-    const title = first.head.title || clip(first.history[first.history.length - 1]?.user ?? "", 40);
-    const img = Object.values(first.images).find((im) => im.url?.startsWith("/api/img/"))?.url;
-    saving.current = saving.current
-      .then(() => api.saveThread(id, { title, bg: first.head.bg, img }, pages))
-      .then(() => setRecent({ id, title, updated: new Date().toISOString(), count: pages.length }), () => toast(T.notSaved));
-  }
+  const save = saving.save;
   const settled = Object.values(s.images).filter((im) => !im.pending).length;
   useEffect(() => {
-    if (MOCK || !s.busy || !s.thread || !s.head || !s.turnOps.length) return;
+    if (MOCK || abort.current?.signal.aborted || !s.busy || !s.thread || !s.head || !s.turnOps.length) return;
     unfinished.current = s.thread;
     const page: Page = { head: s.head, blocks: s.blocks.filter((b) => !s.stale.has(b.id)), images: s.images, history: [...s.history, { user: s.seen || s.question, ops: forHistory(s.turnOps) }].slice(-3) };
     save(s.thread, [...s.pages.slice(0, s.at + 1), page]);
@@ -272,31 +279,14 @@ export function App() {
     const cur = state.current;
     if (cur.busy && unfinished.current === cur.thread) {
       if (cur.pages.length) save(cur.thread, cur.pages);
-      else saving.current = saving.current.then(() => api.deleteThread(cur.thread)).then(latest, () => {});
+      else void saving.remove(cur.thread).then(latest, () => {});
     }
     unfinished.current = "";
   }
 
-  function toast(text: string, undo?: () => void) {
-    const id = Date.now() + Math.random();
-    setToasts((ts) => [...ts.slice(-2), { id, text, undo }]);
-    window.setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 7000);
-  }
-
-  async function pickFile(file: File) {
-    try {
-      setAttach(await toJpeg(file));
-    } catch {
-      toast(T.badPic);
-    }
-  }
-
-  async function say(raw: string) {
-    const image = attach || undefined;
+  const sendTurn = useCallback((raw: string, image?: string) => {
     const input = raw.trim() || (image ? T.defaultAsk : "");
-    if (!input || state.current.busy) return;
-    setDraft("");
-    setAttach("");
+    if (!input || state.current.busy || (abort.current && !abort.current.signal.aborted)) return false;
     window.scrollTo({ top: 0, behavior: "smooth" });
     const cur = state.current;
     const images: Record<string, string> = {};
@@ -314,6 +304,7 @@ export function App() {
     let failed = false;
     const loading: Promise<void>[] = [];
     const onEvent = (e: StreamEvent) => {
+      if (ctl.signal.aborted) return;
       if (e.event === "memory") {
         // The model noted a lasting preference; show it so it can be taken back.
         const added: { id: string; text: string }[] = Array.isArray(e.data?.added) ? e.data.added : [];
@@ -326,24 +317,28 @@ export function App() {
         dispatch({ type: "event", e });
       }
     };
-    try {
-      await runTurn({ input, history: cur.history, images, image }, onEvent, ctl.signal);
-      await Promise.all(loading);
-    } catch (err) {
-      failed = true;
-      if (!ctl.signal.aborted) dispatch({ type: "event", e: { event: "error", data: { message: T.dropped } } });
-    }
-    if (ctl.signal.aborted) return;
-    dispatch({ type: "finish", input, failed });
-    pending.current = false;
-    if (!made) {
-      // Nothing came of the question: step off the entry that was added for it.
-      skipPop.current = true;
-      history.back();
-    }
-  }
+    void (async () => {
+      try {
+        await runTurn({ input, history: cur.history, images, image }, onEvent, ctl.signal);
+        await Promise.all(loading);
+      } catch (err) {
+        failed = true;
+        if (!ctl.signal.aborted) dispatch({ type: "event", e: { event: "error", data: { message: T.dropped } } });
+      }
+      if (ctl.signal.aborted) return;
+      abort.current = null;
+      dispatch({ type: "finish", input, failed });
+      pending.current = false;
+      if (!made) {
+        // Nothing came of the question: step off the entry that was added for it.
+        skipPop.current = true;
+        history.back();
+      }
+    })();
+    return true;
+  }, [toast]);
 
-  const latest = () => api.threads().then((r) => setRecent(r.threads[0] ?? null), () => {});
+  const latest = () => api.threads(1).then((r) => setRecent(r.threads[0] ?? null), () => {});
   const resume = () => (recent && recent.id === s.thread && s.pages.length ? show(s.pages.length - 1) : recent && openThread(recent.id));
 
   async function openThread(id: string) {
@@ -367,7 +362,7 @@ export function App() {
     <div className={`app ${s.busy ? "is-busy" : ""} ${waitingFirst ? "is-thinking" : ""} ${s.head ? "" : "is-home"} ${theme.dark ? "on-dark" : "on-light"} ${heroClass} ${stage ? "tpl-" + stage.tpl : ""}`}>
       <div className="field" aria-hidden>
         <AnimatePresence>
-          <motion.div key={field} className="field-layer" style={{ background: field }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0.999 }} transition={{ duration: 1.1, ease: "easeInOut" }} />
+          <m.div key={field} className="field-layer" style={{ background: field }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0.999 }} transition={{ duration: 1.1, ease: "easeInOut" }} />
         </AnimatePresence>
       </div>
       <div className="glow" aria-hidden />
@@ -415,19 +410,19 @@ export function App() {
       <LayoutGroup>
         <AnimatePresence mode="wait">
           {waitingFirst && !s.head ? (
-            <motion.div key="asking" className="asking" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.6 }}>
+            <m.div key="asking" className="asking" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.6 }}>
               <p>{s.asking}</p>
-            </motion.div>
+            </m.div>
           ) : s.head && stage ? (
-            <motion.div key={"scene-" + stage.tpl} className={waitingFirst ? "scene-wrap is-waiting" : "scene-wrap"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.5 }}>
+            <m.div key={"scene-" + stage.tpl} className={waitingFirst ? "scene-wrap is-waiting" : "scene-wrap"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.5 }}>
               <Scene head={s.head} stage={stage} images={s.images} stale={s.stale} busy={s.busy} onSay={say} />
-            </motion.div>
+            </m.div>
           ) : (
-            <motion.div key="home" className="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.8 }}>
+            <m.div key="home" className="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.8 }}>
               <div className="hero">
                 <figure className="figure">
                   <div className="figure-imgs">
-                    <img src={cover.url} alt="" draggable={false} />
+                    <img src={cover.url} alt="" draggable={false} fetchPriority="high" decoding="async" />
                   </div>
                 </figure>
               </div>
@@ -474,86 +469,44 @@ export function App() {
                   ))}
                 </ul>
               </div>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </LayoutGroup>
 
-      <div className="dock">
-        {s.error && (
-          <p className="error" role="alert">
-            {s.error}
-          </p>
-        )}
-        <form
-          className="composer"
-          onSubmit={(e) => {
-            e.preventDefault();
-            say(draft);
-          }}
-        >
-          {attach ? (
-            <button type="button" className="attach has-image" onClick={() => setAttach("")} aria-label={T.removePic} title={T.removePic}>
-              <img src={attach} alt="" />
-            </button>
-          ) : (
-            <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label={T.addPic} title={T.addPicTitle}>
-              {s.busy ? <span className="orb" aria-hidden /> : "＋"}
-            </button>
-          )}
-          <input
-            ref={picker}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) pickFile(file);
-            }}
-          />
-          {/* Return starts a new line; Command or Control with Return sends, so a
-              half-typed question or an input method's confirming Return never goes out by accident. */}
-          <textarea
-            ref={box}
-            rows={1}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                say(draft);
-              }
-            }}
-            placeholder={s.busy ? (s.asking ? T.phMaking : T.phPictures) : attach ? T.phWithPic : s.head ? T.phFollow : T.phFirst}
-            maxLength={400}
-            aria-label={T.inputLabel}
-            enterKeyHint="enter"
-          />
-          {draft.trim() && !s.busy && <kbd className="send-key" aria-hidden>{SEND_KEY}</kbd>}
-          <button type="submit" className="send" disabled={(!draft.trim() && !attach) || s.busy} aria-label={T.send} title={`${T.send} (${SEND_KEY})`}>
-            ↑
-          </button>
-        </form>
-      </div>
+      <Composer ref={composer} busy={s.busy} asking={!!s.asking} hasHead={!!s.head} error={s.error} onSend={sendTurn} onToast={toast} />
 
       <AnimatePresence>
-        {panel === "memory" && <ProfilePanel key="memory" profile={profile} onChange={setProfile} onClose={() => setPanel("")} />}
+        {panel === "memory" && (
+          <Suspense key="memory" fallback={null}>
+            <ProfilePanel profile={profile} onChange={setProfile} onClose={() => setPanel("")} />
+          </Suspense>
+        )}
         {panel === "history" && (
-          <HistoryPanel
-            key="history"
-            current={s.thread}
-            onOpen={openThread}
-            onClose={() => setPanel("")}
-            onDeleted={(id) => {
-              latest();
-              if (id !== state.current.thread) return;
-              unfinished.current = "";
-              abort.current?.abort();
-              enter({ i: -1 });
-              dispatch({ type: "open", thread: "", pages: [], to: -1 });
-            }}
-          />
+          <Suspense key="history" fallback={null}>
+            <HistoryPanel
+              current={s.thread}
+              onDelete={(id) => {
+                const cur = state.current;
+                if (cur.thread === id && cur.busy) {
+                  unfinished.current = "";
+                  abort.current?.abort();
+                  dispatch({ type: "go", to: cur.at });
+                }
+                return saving.remove(id);
+              }}
+              onOpen={openThread}
+              onClose={() => setPanel("")}
+              onDeleted={(id) => {
+                latest();
+                if (id !== state.current.thread) return;
+                unfinished.current = "";
+                abort.current?.abort();
+                enter({ i: -1 });
+                dispatch({ type: "open", thread: "", pages: [], to: -1 });
+              }}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((ts) => ts.filter((t) => t.id !== id))} />

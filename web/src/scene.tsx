@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { memo, useState } from "react";
+import { AnimatePresence, m } from "motion/react";
 import type { Head, Img, Op } from "./types";
 import { inkOn, midStop, validHex } from "./theme";
 import { T } from "./i18n";
@@ -60,7 +60,7 @@ type Props = {
   onSay: (text: string) => void;
 };
 
-export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
+export const Scene = memo(function Scene({ head, stage, images, stale, busy, onSay }: Props) {
   const { tpl, hero, bands, tiles, options, body } = stage;
   const done = body.some((b) => b.t === "actions");
   const cls = ["scene", `is-${tpl}`, `layout-${head.layout}`, `tone-${head.tone}`].join(" ");
@@ -73,9 +73,9 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
     <main className={cls}>
       <AnimatePresence>
         {hero && (
-          <motion.div key={hero.id} className={`hero ${stage.framed ? "is-framed" : ""} ${kindOf(hero) === "upload" ? "is-upload" : ""} ${stale.has(hero.id) ? "is-stale" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }}>
+          <m.div key={hero.id} className={`hero ${stage.framed ? "is-framed" : ""} ${kindOf(hero) === "upload" ? "is-upload" : ""} ${stale.has(hero.id) ? "is-stale" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }}>
             <Figure img={images[hero.id]} />
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
 
@@ -83,17 +83,17 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
 
       <header className="head">
         {str(head.kicker) && (
-          <motion.p className="kicker" key={head.kicker} {...enter} transition={spring}>
+          <m.p className="kicker" key={head.kicker} {...enter} transition={spring}>
             {head.kicker}
-          </motion.p>
+          </m.p>
         )}
-        <motion.h1 className={`title len-${titleLen(head.title)}`} key={head.title} {...enter} transition={{ ...spring, delay: 0.06 }}>
+        <m.h1 className={`title len-${titleLen(head.title)}`} key={head.title} {...enter} transition={{ ...spring, delay: 0.06 }}>
           {head.title}
-        </motion.h1>
+        </m.h1>
         {str(head.lede) && (
-          <motion.p className="lede" key={head.lede} {...enter} transition={{ ...spring, delay: 0.14 }}>
+          <m.p className="lede" key={head.lede} {...enter} transition={{ ...spring, delay: 0.14 }}>
             {head.lede}
-          </motion.p>
+          </m.p>
         )}
       </header>
 
@@ -101,7 +101,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
         <div className="gallery">
           <AnimatePresence mode="popLayout">
             {options.map((b, i) => (
-              <motion.article key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile option ${b.pick ? "is-pick" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
+              <m.article key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile option ${b.pick ? "is-pick" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
                 <div className="tile-figure">
                   <Figure img={images[b.id]} />
                 </div>
@@ -117,10 +117,10 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
                     ))}
                   </ul>
                 </div>
-              </motion.article>
+              </m.article>
             ))}
             {tiles.map((b, i) => (
-              <motion.div key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile picture ${isSquare(b) ? "is-square" : ""} ${isFramed(b) ? "is-framed" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
+              <m.div key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile picture ${isSquare(b) ? "is-square" : ""} ${isFramed(b) ? "is-framed" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
                 <Figure img={images[b.id]} />
                 {/* Says what the picture shows, so it can be matched to the text beside it. */}
                 {str(b.caption) && (
@@ -130,7 +130,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
                     {str(b.note) && <small>{str(b.note)}</small>}
                   </p>
                 )}
-              </motion.div>
+              </m.div>
             ))}
           </AnimatePresence>
         </div>
@@ -141,9 +141,9 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
           {body.map((b) => {
             const Block = renderers[b.t];
             return (
-              <motion.section key={b.id} layoutId={b.id} layout="position" className={`block block-${b.t} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={spring}>
+              <m.section key={b.id} layoutId={b.id} layout="position" className={`block block-${b.t} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={spring}>
                 <Block op={b} onSay={onSay} busy={busy} />
-              </motion.section>
+              </m.section>
             );
           })}
         </AnimatePresence>
@@ -151,7 +151,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
       </div>
     </main>
   );
-}
+});
 
 /** Long titles get a smaller size so the display type never breaks the page. */
 function titleLen(title: unknown) {
@@ -168,7 +168,7 @@ function Figure({ img }: { img?: Img }) {
       <div className="figure-imgs">
         <AnimatePresence>
           {url && (
-            <motion.img key={url} src={url} alt="" draggable={false} initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1, ease }} />
+            <m.img key={url} src={url} alt="" draggable={false} initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1, ease }} />
           )}
         </AnimatePresence>
       </div>
@@ -188,7 +188,7 @@ function Bands({ op }: { op: Op }) {
   return (
     <div className={`bands ${rows ? "is-rows" : "is-cols"} ${items.length > 4 ? "is-many" : ""}`}>
       {items.map((it, i) => (
-        <motion.div
+        <m.div
           key={i}
           className="band"
           style={{ background: it.hex, color: inkOn(it.hex) }}
@@ -202,7 +202,7 @@ function Bands({ op }: { op: Op }) {
             <span className="band-name">{str(it.name)}</span>
             {str(it.note) && <span className="band-note">{str(it.note)}</span>}
           </div>
-        </motion.div>
+        </m.div>
       ))}
     </div>
   );
@@ -292,7 +292,7 @@ const renderers: Record<string, (p: BlockProps) => React.ReactNode> = {
           <div className="bar" key={i}>
             <span className="bar-label">{str(it.label)}</span>
             <span className="bar-track">
-              <motion.span className="bar-fill" initial={{ width: 0 }} animate={{ width: `${Math.max((it.value / top) * 100, 1.5)}%` }} transition={{ duration: 1, ease, delay: 0.08 * i }} />
+              <m.span className="bar-fill" initial={{ width: 0 }} animate={{ width: `${Math.max((it.value / top) * 100, 1.5)}%` }} transition={{ duration: 1, ease, delay: 0.08 * i }} />
             </span>
             <span className="bar-value">
               {it.value.toLocaleString("zh-CN")}
@@ -392,10 +392,10 @@ function Quiz({ op }: { op: Op }) {
         ))}
       </div>
       {picked !== null && (
-        <motion.p className="quiz-why" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <m.p className="quiz-why" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
           {picked === answer ? T.right : T.wrong}
           {str(op.why)}
-        </motion.p>
+        </m.p>
       )}
     </div>
   );

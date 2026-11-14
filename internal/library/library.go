@@ -5,15 +5,18 @@
 package library
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -50,30 +53,59 @@ type Thread struct {
 type Store struct {
 	threads, images string
 	mu              sync.Mutex
+	index           map[string]Meta
+	ordered         []Meta
+	refs            map[string][]string
+	threadCache     cache[Thread]
+	imageCache      cache[cachedImage]
 }
 
 func Open(dir string) (*Store, error) {
-	s := &Store{threads: filepath.Join(dir, "threads"), images: filepath.Join(dir, "images")}
+	s := &Store{threads: filepath.Join(dir, "threads"), images: filepath.Join(dir, "images"), index: make(map[string]Meta), refs: make(map[string][]string)}
 	for _, d := range []string{s.threads, s.images} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, err
 		}
 	}
+	// Build metadata and image references once. Even a damaged thread file
+	// protects its pictures from sweeping until the thread is removed.
+	files, err := filepath.Glob(filepath.Join(s.threads, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		buf, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		s.refs[strings.TrimSuffix(filepath.Base(f), ".json")] = imageRefs(buf)
+		var m Meta
+		if json.Unmarshal(buf, &m) == nil && idRe.MatchString(m.ID) && filepath.Base(f) == m.ID+".json" {
+			s.index[m.ID] = m
+		}
+	}
+	s.sortIndex()
 	return s, nil
 }
 
 // SaveImage stores a picture and returns the address pages refer to it by.
 func (s *Store) SaveImage(data []byte) (string, error) {
-	ext, ok := imgExts[http.DetectContentType(data)]
+	contentType := http.DetectContentType(data)
+	ext, ok := imgExts[contentType]
 	if !ok {
 		return "", errors.New("not a picture")
 	}
 	b := make([]byte, 12)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
 	name := hex.EncodeToString(b) + ext
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := os.WriteFile(filepath.Join(s.images, name), data, 0o600); err != nil {
 		return "", err
 	}
+	s.cacheImage(name, data, contentType)
 	return ImagePrefix + name, nil
 }
 
@@ -93,8 +125,8 @@ func (s *Store) path(id string) string { return filepath.Join(s.threads, id+".js
 
 // Put saves a thread, replacing an earlier version of it.
 func (s *Store) Put(id, title, bg, img string, pages json.RawMessage) error {
-	var list []json.RawMessage
-	if !idRe.MatchString(id) || json.Unmarshal(pages, &list) != nil || len(list) == 0 {
+	count, valid := pageCount(pages)
+	if !idRe.MatchString(id) || !valid {
 		return ErrBad
 	}
 	if !hexRe.MatchString(bg) {
@@ -103,7 +135,7 @@ func (s *Store) Put(id, title, bg, img string, pages json.RawMessage) error {
 	if _, ok := s.ImageFile(img); !ok {
 		img = ""
 	}
-	t := Thread{Meta: Meta{ID: id, Title: title, Updated: time.Now().UTC(), Count: len(list), Bg: bg, Img: img}, Pages: pages}
+	t := Thread{Meta: Meta{ID: id, Title: title, Updated: time.Now().UTC(), Count: count, Bg: bg, Img: img}, Pages: pages}
 	buf, err := json.Marshal(t)
 	if err != nil {
 		return err
@@ -117,9 +149,14 @@ func (s *Store) Put(id, title, bg, img string, pages json.RawMessage) error {
 	if err := os.Rename(tmp, s.path(id)); err != nil {
 		return err
 	}
-	if all := s.list(); len(all) > maxThreads {
-		for _, old := range all[maxThreads:] {
-			s.remove(old.ID)
+	s.index[id] = t.Meta
+	s.refs[id] = imageRefs(buf)
+	s.threadCache.put(id, cloneThread(t), 0, 32, 0)
+	s.sortIndex()
+	if len(s.ordered) > maxThreads {
+		old := append([]Meta(nil), s.ordered[maxThreads:]...)
+		for _, m := range old {
+			s.remove(m.ID)
 		}
 	}
 	return nil
@@ -130,35 +167,95 @@ func (s *Store) Get(id string) (Thread, error) {
 	if !idRe.MatchString(id) {
 		return t, ErrBad
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.threadCache.get(id); ok {
+		return cloneThread(t), nil
+	}
 	buf, err := os.ReadFile(s.path(id))
 	if err != nil {
 		return t, err
 	}
-	return t, json.Unmarshal(buf, &t)
+	if err := json.Unmarshal(buf, &t); err != nil {
+		return t, err
+	}
+	s.threadCache.put(id, t, 0, 32, 0)
+	return cloneThread(t), nil
 }
 
 // List returns every thread, most recent first.
-func (s *Store) List() []Meta {
+func (s *Store) List() []Meta { return s.ListN(0) }
+
+// ListN returns at most limit entries; a non-positive limit returns all entries.
+func (s *Store) ListN(limit int) []Meta {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.list()
+	n := len(s.ordered)
+	if limit > 0 && limit < n {
+		n = limit
+	}
+	out := make([]Meta, n)
+	copy(out, s.ordered[:n])
+	return out
 }
 
-func (s *Store) list() []Meta {
-	out := []Meta{}
-	files, _ := filepath.Glob(filepath.Join(s.threads, "*.json"))
-	for _, f := range files {
-		buf, err := os.ReadFile(f)
-		if err != nil {
-			continue
+func (s *Store) sortIndex() {
+	s.ordered = s.ordered[:0]
+	for _, m := range s.index {
+		s.ordered = append(s.ordered, m)
+	}
+	sort.Slice(s.ordered, func(i, j int) bool {
+		if s.ordered[i].Updated.Equal(s.ordered[j].Updated) {
+			return s.ordered[i].ID < s.ordered[j].ID
 		}
-		var m Meta
-		if json.Unmarshal(buf, &m) == nil && m.ID != "" {
-			out = append(out, m)
+		return s.ordered[i].Updated.After(s.ordered[j].Updated)
+	})
+}
+
+func cloneThread(t Thread) Thread {
+	t.Pages = bytes.Clone(t.Pages)
+	return t
+}
+
+// pageCount validates the complete JSON document without retaining every page.
+func pageCount(pages []byte) (int, bool) {
+	dec := json.NewDecoder(bytes.NewReader(pages))
+	token, err := dec.Token()
+	if err != nil || token != json.Delim('[') {
+		return 0, false
+	}
+	var page json.RawMessage
+	count := 0
+	for dec.More() {
+		if dec.Decode(&page) != nil {
+			return 0, false
+		}
+		count++
+	}
+	token, err = dec.Token()
+	if err != nil || token != json.Delim(']') || count == 0 {
+		return 0, false
+	}
+	return count, dec.Decode(&page) == io.EOF
+}
+
+func imageRefs(buf []byte) []string {
+	var refs []string
+	for _, m := range imgRef.FindAllSubmatch(buf, -1) {
+		refs = append(refs, string(m[1]))
+	}
+	return refs
+}
+
+func (s *Store) usedImage(name string) bool {
+	for _, refs := range s.refs {
+		for _, ref := range refs {
+			if ref == name {
+				return true
+			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
-	return out
+	return false
 }
 
 // Delete removes a thread together with its pictures.
@@ -172,38 +269,102 @@ func (s *Store) Delete(id string) error {
 }
 
 func (s *Store) remove(id string) error {
-	buf, err := os.ReadFile(s.path(id))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
+	if err := os.Remove(s.path(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, m := range imgRef.FindAllSubmatch(buf, -1) {
-		os.Remove(filepath.Join(s.images, string(m[1])))
+	refs := s.refs[id]
+	delete(s.index, id)
+	delete(s.refs, id)
+	s.threadCache.remove(id)
+	s.sortIndex()
+	for _, name := range refs {
+		// Pictures may be reused by another conversation.
+		if !s.usedImage(name) {
+			os.Remove(filepath.Join(s.images, name))
+			s.imageCache.remove(name)
+		}
 	}
-	return os.Remove(s.path(id))
+	return nil
 }
 
 // Sweep removes pictures no thread refers to, such as those of a page that was
 // abandoned or replaced. Recent ones are left: their page may not be saved yet.
 func (s *Store) Sweep(olderThan time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	used := map[string]bool{}
-	files, _ := filepath.Glob(filepath.Join(s.threads, "*.json"))
-	for _, f := range files {
-		buf, _ := os.ReadFile(f)
-		for _, m := range imgRef.FindAllSubmatch(buf, -1) {
-			used[string(m[1])] = true
-		}
-	}
+	// Directory enumeration does not stall readers or writers. Recheck references
+	// and modification time under the lock immediately before each removal.
 	entries, _ := os.ReadDir(s.images)
 	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil || used[e.Name()] || time.Since(info.ModTime()) < olderThan {
+		if !nameRe.MatchString(e.Name()) {
 			continue
 		}
-		os.Remove(filepath.Join(s.images, e.Name()))
+		s.mu.Lock()
+		info, err := os.Stat(filepath.Join(s.images, e.Name()))
+		if err == nil && !s.usedImage(e.Name()) && time.Since(info.ModTime()) >= olderThan {
+			if os.Remove(filepath.Join(s.images, e.Name())) == nil {
+				s.imageCache.remove(e.Name())
+			}
+		}
+		s.mu.Unlock()
 	}
+}
+
+type cachedImage struct {
+	data        []byte
+	contentType string
+	etag        string
+}
+
+const maxCachedImage = 2 << 20
+
+func (s *Store) cacheImage(name string, data []byte, contentType string) {
+	if len(data) <= maxCachedImage {
+		s.imageCache.put(name, cachedImage{data: bytes.Clone(data), contentType: contentType, etag: imageETag(name)}, len(data), 64, 16<<20)
+	}
+}
+
+// DiscardImage removes an abandoned upload, unless a saved thread uses it.
+func (s *Store) DiscardImage(ref string) error {
+	file, ok := s.ImageFile(ref)
+	if !ok {
+		return ErrBad
+	}
+	name := filepath.Base(file)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.usedImage(name) {
+		return nil
+	}
+	if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	s.imageCache.remove(name)
+	return nil
+}
+
+// Image names are fresh random IDs and immutable, so the name identifies the
+// representation even after cache eviction or a restart. No content hash needed.
+func imageETag(name string) string { return `"` + name + `"` }
+
+// ReadImage reads a saved picture, returning independent bytes and its ETag.
+func (s *Store) ReadImage(ref string) ([]byte, string, string, bool) {
+	file, ok := s.ImageFile(ref)
+	if !ok {
+		return nil, "", "", false
+	}
+	name := filepath.Base(file)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if img, ok := s.imageCache.get(name); ok {
+		return bytes.Clone(img.data), img.contentType, img.etag, true
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, "", "", false
+	}
+	contentType := http.DetectContentType(data)
+	if _, ok := imgExts[contentType]; !ok {
+		return nil, "", "", false
+	}
+	s.cacheImage(name, data, contentType)
+	return data, contentType, imageETag(name), true
 }

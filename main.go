@@ -53,19 +53,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/turn", a.HandleTurn)
-	mux.HandleFunc("GET /api/profile", a.HandleProfile)
-	mux.HandleFunc("DELETE /api/profile", a.HandleClearProfile)
-	mux.HandleFunc("DELETE /api/pref/{id}", a.HandleDeletePref)
-	mux.HandleFunc("GET /api/threads", a.HandleThreads)
-	mux.HandleFunc("GET /api/threads/{id}", a.HandleThread)
-	mux.HandleFunc("PUT /api/threads/{id}", a.HandleSaveThread)
-	mux.HandleFunc("DELETE /api/threads/{id}", a.HandleDeleteThread)
-	mux.HandleFunc("GET /api/img/{name}", a.HandleImage)
-	mux.HandleFunc("GET /api/setup", a.HandleSetup)
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
-	mux.Handle("/", http.FileServerFS(web))
+	assets, err := staticHandler(web)
+	if err != nil {
+		log.Fatal(err)
+	}
+	mux := newMux(a, assets)
 
 	addr := env("ADDR", "127.0.0.1:8787")
 	log.Printf("folio listening on %s (text=%s image=%s)", addr, a.TextModel, a.ImageModel)
@@ -79,4 +71,21 @@ func main() {
 		}
 	}()
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+func newMux(a *agent.Agent, assets http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/turn", a.HandleTurn)
+	mux.HandleFunc("GET /api/profile", a.HandleProfile)
+	mux.HandleFunc("DELETE /api/profile", a.HandleClearProfile)
+	mux.HandleFunc("DELETE /api/pref/{id}", a.HandleDeletePref)
+	mux.HandleFunc("GET /api/threads", a.HandleThreads)
+	mux.HandleFunc("GET /api/threads/{id}", a.HandleThread)
+	mux.HandleFunc("PUT /api/threads/{id}", a.HandleSaveThread)
+	mux.HandleFunc("DELETE /api/threads/{id}", a.HandleDeleteThread)
+	mux.HandleFunc("GET /api/img/{name}", a.HandleImage)
+	mux.HandleFunc("GET /api/setup", a.HandleSetup)
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.Handle("/", assets)
+	return mux
 }

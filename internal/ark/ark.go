@@ -32,7 +32,9 @@ func New(key, base string) *Client {
 	// it, minutes later. Pinging it when it goes quiet drops it within seconds.
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.HTTP2 = &http.HTTP2Config{SendPingTimeout: 10 * time.Second, PingTimeout: 5 * time.Second}
-	tr.IdleConnTimeout = 60 * time.Second
+	tr.MaxIdleConns = 64
+	tr.MaxIdleConnsPerHost = 16
+	tr.IdleConnTimeout = 90 * time.Second
 	return &Client{key: key, base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 120 * time.Second, Transport: tr}}
 }
 
@@ -182,13 +184,12 @@ func (c *Client) ChatStream(ctx context.Context, model string, msgs []Message, m
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		line := sc.Text()
-		data, ok := strings.CutPrefix(line, "data:")
+		data, ok := bytes.CutPrefix(sc.Bytes(), []byte("data:"))
 		if !ok {
 			continue
 		}
-		data = strings.TrimSpace(data)
-		if data == "[DONE]" {
+		data = bytes.TrimSpace(data)
+		if bytes.Equal(data, []byte("[DONE]")) {
 			break
 		}
 		var chunk struct {
@@ -205,7 +206,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, msgs []Message, m
 				} `json:"prompt_tokens_details"`
 			} `json:"usage"`
 		}
-		if json.Unmarshal([]byte(data), &chunk) != nil {
+		if json.Unmarshal(data, &chunk) != nil {
 			continue
 		}
 		// The last chunk carries the totals and no text.

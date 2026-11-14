@@ -2,9 +2,11 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"log"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Lewin671/folio/internal/ark"
+	"github.com/Lewin671/folio/internal/httpx"
 	"github.com/Lewin671/folio/internal/profile"
 )
 
@@ -26,44 +29,67 @@ const lookPrompt = `用中文描述这张图片，供一位讲解员据此为用
 // look puts an attached picture into words for the text model. Only pictures
 // that decode as images are forwarded.
 func (a *Agent) look(ctx context.Context, dataURL, lang string) (string, error) {
+	if _, err := decodeUpload(dataURL); err != nil {
+		return "", err
+	}
+	return a.describe(ctx, dataURL, lang)
+}
+
+func decodeUpload(dataURL string) ([]byte, error) {
 	_, b64, ok := strings.Cut(dataURL, ";base64,")
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if !ok || err != nil {
-		return "", fmt.Errorf("not a base64 data url")
+		return nil, fmt.Errorf("not a base64 data url")
 	}
 	if _, _, err := image.DecodeConfig(bytes.NewReader(raw)); err != nil {
-		return "", fmt.Errorf("not an image: %w", err)
+		return nil, fmt.Errorf("not an image: %w", err)
 	}
+	return raw, nil
+}
+
+func (a *Agent) describe(ctx context.Context, dataURL, lang string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, visionTimeout)
 	defer cancel()
 	text, err := a.Ark.Vision(ctx, a.VisionModel, say(lang, lookPromptEN, lookPrompt), []string{dataURL})
+	a.invalidateSetup(err)
 	if err != nil {
 		return "", err
 	}
 	return clipRunes(text, 400), nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		http.Error(w, "json encoding failed", 500)
+		return
+	}
+	data := buf.Bytes()
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Add("Vary", "Accept-Encoding")
+	if len(data) >= 512 && httpx.AcceptsGzip(r) {
+		data = httpx.Gzip(data, gzip.DefaultCompression)
+		w.Header().Set("Content-Encoding", "gzip")
+	}
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	w.Write(data)
 }
 
-func (a *Agent) HandleProfile(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.Profile.Get())
+func (a *Agent) HandleProfile(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, r, http.StatusOK, a.Profile.Get())
 }
 
 func (a *Agent) HandleClearProfile(w http.ResponseWriter, r *http.Request) {
 	if err := a.Profile.Clear(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": say(langOf(r), "Couldn’t clear it. Please try again.", "没清掉，请再试一次。")})
+		writeJSON(w, r, http.StatusInternalServerError, map[string]string{"error": say(langOf(r), "Couldn’t clear it. Please try again.", "没清掉，请再试一次。")})
 		return
 	}
-	writeJSON(w, http.StatusOK, a.Profile.Get())
+	writeJSON(w, r, http.StatusOK, a.Profile.Get())
 }
 
 func (a *Agent) HandleDeletePref(w http.ResponseWriter, r *http.Request) {
 	a.Profile.DeletePref(r.PathValue("id"))
-	writeJSON(w, http.StatusOK, a.Profile.Get())
+	writeJSON(w, r, http.StatusOK, a.Profile.Get())
 }
 
 // profileNote is what the text model is told about the user on every turn.
@@ -89,16 +115,87 @@ func clipRunes(s string, n int) string {
 
 // Setup reports what stops the app from working with the configured key and
 // models, in words for the person who started it. An empty list means ready.
+type setupResult struct {
+	model string
+	err   error
+}
+
+type setupFlight struct {
+	done    chan struct{}
+	results []setupResult
+}
+
+type setupCache struct {
+	mu         sync.Mutex
+	expires    time.Time
+	results    []setupResult
+	flight     *setupFlight
+	generation uint64
+}
+
+func (a *Agent) invalidateSetup(err error) {
+	var apiErr *ark.APIError
+	if !errors.As(err, &apiErr) {
+		return
+	}
+	a.setup.mu.Lock()
+	a.setup.expires = time.Time{}
+	a.setup.generation++
+	a.setup.mu.Unlock()
+}
+
 func (a *Agent) Setup(ctx context.Context, lang string) []string {
+	return a.setupProblems(ctx, lang, false)
+}
+
+func (a *Agent) setupProblems(ctx context.Context, lang string, fresh bool) []string {
+	a.setup.mu.Lock()
+	if !fresh && time.Now().Before(a.setup.expires) {
+		results := a.setup.results
+		a.setup.mu.Unlock()
+		return formatSetup(results, lang)
+	}
+	flight := a.setup.flight
+	if flight == nil {
+		flight = &setupFlight{done: make(chan struct{})}
+		a.setup.flight = flight
+		generation := a.setup.generation
+		// One disconnected browser must not cancel checks shared by other callers.
+		go func() {
+			results := a.checkSetup(context.WithoutCancel(ctx))
+			ttl := 5 * time.Minute
+			for _, result := range results {
+				if result.err != nil {
+					ttl = 15 * time.Second
+					break
+				}
+			}
+			a.setup.mu.Lock()
+			flight.results = results
+			if generation == a.setup.generation {
+				a.setup.results = results
+				a.setup.expires = time.Now().Add(ttl)
+			}
+			a.setup.flight = nil
+			close(flight.done)
+			a.setup.mu.Unlock()
+		}()
+	}
+	a.setup.mu.Unlock()
+	select {
+	case <-flight.done:
+		return formatSetup(flight.results, lang)
+	case <-ctx.Done():
+		return formatSetup([]setupResult{{a.TextModel, ctx.Err()}}, lang)
+	}
+}
+
+func (a *Agent) checkSetup(ctx context.Context) []setupResult {
 	checks := []struct {
 		model string
 		run   func(context.Context, string) error
-	}{
-		{a.TextModel, a.Ark.CheckChat},
-		{a.VisionModel, a.Ark.CheckChat},
-		{a.ImageModel, a.Ark.CheckImage},
-	}
-	problems := make([]string, len(checks))
+	}{{a.TextModel, a.Ark.CheckChat}, {a.VisionModel, a.Ark.CheckChat}, {a.ImageModel, a.Ark.CheckImage}}
+	results := make([]setupResult, len(checks))
 	var wg sync.WaitGroup
 	for i, c := range checks {
 		wg.Add(1)
@@ -106,19 +203,29 @@ func (a *Agent) Setup(ctx context.Context, lang string) []string {
 			defer wg.Done()
 			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
-			if err := c.run(cctx, c.model); err != nil {
+			err := c.run(cctx, c.model)
+			if err != nil {
 				log.Printf("setup check %s: %v", c.model, err)
-				if problems[i] = ark.Hint(err, lang); problems[i] == "" {
-					problems[i] = fmt.Sprintf(say(lang, "Can’t reach model %s. Check the network.", "连不上模型 %s，请检查网络。"), c.model)
-				}
 			}
+			results[i] = setupResult{c.model, err}
 		}()
 	}
 	wg.Wait()
+	return results
+}
+
+func formatSetup(results []setupResult, lang string) []string {
 	seen := map[string]bool{}
 	out := []string{}
-	for _, p := range problems {
-		if p != "" && !seen[p] {
+	for _, result := range results {
+		if result.err == nil {
+			continue
+		}
+		p := ark.Hint(result.err, lang)
+		if p == "" {
+			p = fmt.Sprintf(say(lang, "Can’t reach model %s. Check the network.", "连不上模型 %s，请检查网络。"), result.model)
+		}
+		if !seen[p] {
 			seen[p] = true
 			out = append(out, p)
 		}
@@ -128,5 +235,5 @@ func (a *Agent) Setup(ctx context.Context, lang string) []string {
 
 // HandleSetup lets the page tell a first-time user what is missing.
 func (a *Agent) HandleSetup(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"problems": a.Setup(r.Context(), langOf(r))})
+	writeJSON(w, r, http.StatusOK, map[string]any{"problems": a.setupProblems(r.Context(), langOf(r), r.URL.Query().Get("fresh") == "1")})
 }
