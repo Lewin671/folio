@@ -258,7 +258,9 @@ ul, ol { list-style: none; }
 }
 .layout-gallery.is-gallery .tile.picture { height: 100%; aspect-ratio: 1; }
 .layout-gallery.is-gallery .tile.picture:first-child { grid-row: 1 / 3; aspect-ratio: 0.64; }
-.layout-gallery.is-gallery .tile.picture:nth-child(n + 4) { display: none; }
+.layout-gallery.is-gallery .tile.picture:nth-child(n + 5) { display: none; }
+/* Four pictures make an even two-by-two; three keep the tall lead picture. */
+.layout-gallery.is-gallery .gallery:has(.tile.picture:nth-child(4)) .tile.picture:first-child { grid-row: auto; aspect-ratio: 1; }
 .layout-gallery .figure-imgs img { object-position: center 20%; }
 
 /* A hero page that also got options or extra pictures shows them small. */
@@ -291,6 +293,15 @@ ul, ol { list-style: none; }
 .hero.is-framed .figure-imgs { -webkit-mask-image: none !important; mask-image: none !important; border-radius: 30px; overflow: hidden; background: var(--glass); }
 .hero.is-upload .figure-imgs img { object-fit: contain; }
 .tile.picture.is-framed .figure-imgs img { object-position: center; }
+/* A picture's caption sits on a soft shade of the picture's own foot, so it reads on any image. */
+.tile-caption {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; margin: 0; padding: 44px 20px 18px;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.5)); pointer-events: none;
+}
+.tile-caption .n { font: 11px/1 ui-monospace, "SF Mono", Menlo, monospace; opacity: 0.75; }
+.tile-caption b { font: var(--dw) clamp(17px, 1.5vw, 23px)/1.2 var(--display); letter-spacing: var(--track); }
+.tile-caption small { flex-basis: 100%; font-size: 12px; line-height: 1.45; opacity: 0.85; }
 
 .is-stale { opacity: 0.32; filter: blur(3px); transition: opacity 0.4s, filter 0.4s; }
 .hero.is-stale { filter: blur(10px); }
@@ -409,7 +420,7 @@ blockquote::before { content: "“"; display: block; height: 0.5em; font: 900 2.
 .dock > * { pointer-events: auto; }
 .error { position: absolute; bottom: calc(100% + 4px); font-size: 14px; padding: 9px 18px; border-radius: 99px; background: #1a1614; color: #fff; }
 .composer {
-  display: flex; align-items: center; gap: 12px; width: min(540px, calc(100vw - 32px)); height: 54px; padding: 0 8px;
+  display: flex; align-items: flex-end; gap: 12px; width: min(540px, calc(100vw - 32px)); min-height: 54px; padding: 8px;
   border-radius: 27px; color: var(--ink);
   background: linear-gradient(var(--glass), var(--glass)), color-mix(in srgb, var(--flat) 58%, transparent);
   box-shadow: inset 0 0 0 1px var(--line), 0 12px 40px -12px rgba(0, 0, 0, 0.35);
@@ -418,8 +429,10 @@ blockquote::before { content: "“"; display: block; height: 0.5em; font: 900 2.
 .orb { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
 .is-busy .orb { animation: orb 1.3s ease-in-out infinite; }
 @keyframes orb { 50% { scale: 1.7; opacity: 0.55; } }
-.composer input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; font: inherit; font-size: 16px; color: inherit; }
-.composer input::placeholder { color: var(--faint); }
+.composer textarea { flex: 1; min-width: 0; margin: 0; padding: 7px 0; border: 0; background: none; outline: none; resize: none; font: inherit; font-size: 16px; line-height: 24px; color: inherit; }
+.composer textarea::placeholder { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.send-key { flex: none; align-self: center; font: 12px/1 var(--sans); letter-spacing: 0.06em; color: var(--faint); white-space: nowrap; }
+@media (hover: none) { .send-key { display: none; } }
 .composer .send { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: var(--ink); color: var(--flat); transition: opacity 0.3s, scale 0.3s var(--ease); }
 .composer .send:disabled { opacity: 0.22; }
 .composer .send:not(:disabled):hover { scale: 1.08; }

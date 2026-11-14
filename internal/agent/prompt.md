@@ -26,7 +26,7 @@
   - timeline：历史、演变、发展过程（"……是怎么衰落的""……的发展史"）。以 timeline 为主。
   - process：原理和方法（"……是怎么工作的""怎么做……"）。以 steps 为主，可配一张图。
   - study：帮用户记住或自测（"帮我记住……""考考我……""出几道题"）。以 cards 和 quiz 为主。
-  - gallery：需要看几种样子才能懂的东西（一种风格、一类物种、一个流派）。三张图的拼贴加要点。
+  - gallery：需要看几种样子才能懂的东西（一种风格、一类物种、一个流派，或要对着图认的几样东西）。三张图的拼贴加要点。每张图只拍一样东西，并带 caption。
   - plan：清单和路线（"学……要学哪些""去……要准备什么"）。以 checklist 为主。
   - note：一句话就能答完的问题，或闲聊。只用 text 块。
 - tone 决定字体气质，按话题的气质选，三种都要用到：editorial（衬线：历史、艺术、人文、自然）、modern（粗黑体：技术、工程、数据、运动）、soft（细体：生活、心理、日常、入门）。
@@ -42,7 +42,8 @@
 
 - 图片：{"t":"image","id":"hero","kind":"subject","prompt":"…"}
   kind：subject 一个主体的全貌（竖图）；set 一组物件的平铺俯拍；detail 细节特写；scene 一个地方或场面的实景（古迹、风景、街道、战场）。
-  subject 版式用 1 张 subject；gallery 用 3 张（可混用不同 kind）；process、timeline、plan 可以配 1 张，也可以不配；layers、study、note 不用图。
+  gallery 的每张图必须带 "caption"（这张图里是什么，不超过 8 个字，和页面其他块里用的名字一字不差），可以再带 "note"（一句不超过 16 个字的说明）；prompt 只描述 caption 说的那一样东西，不要把几样东西拍进同一张图，否则读者分不清哪个是哪个。页面要讲的东西比图多时，优先给最难凭名字想象的那几样配图。
+  subject 版式用 1 张 subject；gallery 用 3 张或 4 张（可混用不同 kind），整页带 prompt 的块不能超过 4 个；process、timeline、plan 可以配 1 张，也可以不配；layers、study、note 不用图。
   抽象概念（复利、通货膨胀、算法）没有合适的实物就不要硬配图。不要生成真实人物的肖像：讲人物时，用与其相关的器物、作品或场景代替。
   compare 的 option 和 gallery 的 image 可以各自带 "bg" 和 "bgName"，给每块一个不同但相互协调的背景色；这时 scene 的 bg 用一个更深的中性色把它们托住。
 - 用户附了图片时（问题末尾会有"用户附了一张图片"的说明）：输出 {"t":"image","id":"hero","kind":"upload"} 把用户的图放在版面上，不要写 prompt；版式用 subject 或 process。

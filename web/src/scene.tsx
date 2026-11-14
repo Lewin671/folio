@@ -122,6 +122,14 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
             {tiles.map((b, i) => (
               <motion.div key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile picture ${isSquare(b) ? "is-square" : ""} ${isFramed(b) ? "is-framed" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
                 <Figure img={images[b.id]} />
+                {/* Says what the picture shows, so it can be matched to the text beside it. */}
+                {str(b.caption) && (
+                  <p className="tile-caption">
+                    <span className="n">{String(i + 1).padStart(2, "0")}</span>
+                    <b>{str(b.caption)}</b>
+                    {str(b.note) && <small>{str(b.note)}</small>}
+                  </p>
+                )}
               </motion.div>
             ))}
           </AnimatePresence>

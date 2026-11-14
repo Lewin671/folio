@@ -90,7 +90,7 @@ function reducer(s: State, a: Action): State {
         case "first":
           return { ...s, timing: { ...s.timing, first: data.ms } };
         case "scene_done":
-          return { ...s, timing: { ...s.timing, scene: data.ms }, stale: new Set(), blocks: s.blocks.filter((b) => !s.stale.has(b.id)) };
+          return { ...s, timing: { ...s.timing, scene: data.ms, input: data.input_tokens, cached: data.cached_tokens }, stale: new Set(), blocks: s.blocks.filter((b) => !s.stale.has(b.id)) };
         case "end":
           return { ...s, timing: { ...s.timing, end: data.ms } };
         case "error":
@@ -142,6 +142,7 @@ function applyOp(s: State, op: Op): State {
 
 // Timings are for whoever is tuning the models; add ?timing to the address to see them.
 const SHOW_TIMING = new URLSearchParams(location.search).has("timing");
+const SEND_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ ↵" : "Ctrl ↵";
 const newThread = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n) + "…" : text);
 
@@ -166,6 +167,14 @@ export function App() {
   const [attach, setAttach] = useState(""); // a picture waiting to be sent with the next question
   const [toasts, setToasts] = useState<Toast[]>([]);
   const picker = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // The box grows with what is typed, up to a few lines.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 132) + "px";
+  }, [draft]);
   const abort = useRef<AbortController | null>(null);
   const state = useRef(s);
   state.current = s;
@@ -503,14 +512,26 @@ export function App() {
               if (file) pickFile(file);
             }}
           />
-          <input
+          {/* Return starts a new line; Command or Control with Return sends, so a
+              half-typed question or an input method's confirming Return never goes out by accident. */}
+          <textarea
+            ref={box}
+            rows={1}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                say(draft);
+              }
+            }}
             placeholder={s.busy ? (s.asking ? T.phMaking : T.phPictures) : attach ? T.phWithPic : s.head ? T.phFollow : T.phFirst}
             maxLength={400}
             aria-label={T.inputLabel}
+            enterKeyHint="enter"
           />
-          <button type="submit" className="send" disabled={(!draft.trim() && !attach) || s.busy} aria-label={T.send}>
+          {draft.trim() && !s.busy && <kbd className="send-key" aria-hidden>{SEND_KEY}</kbd>}
+          <button type="submit" className="send" disabled={(!draft.trim() && !attach) || s.busy} aria-label={T.send} title={`${T.send} (${SEND_KEY})`}>
             ↑
           </button>
         </form>
@@ -544,5 +565,6 @@ function TimingLine({ t, busy }: { t: Timing; busy: boolean }) {
   const f = (ms?: number) => (ms == null ? "…" : T.seconds((ms / 1000).toFixed(1)));
   const parts = [`${T.tFirst} ${f(t.first)}`, `${T.tLayout} ${f(t.scene)}`];
   if (t.image != null || (busy && t.scene != null)) parts.push(`${T.tPictures} ${f(t.image)}`);
+  if (t.input) parts.push(T.tCached(Math.round(((t.cached ?? 0) * 100) / t.input)));
   return <>{parts.join(" · ")}</>;
 }

@@ -22,6 +22,7 @@ Folio answers a question with a page instead of a chat message. The layout, colo
 
 - **A different page for every question.** One subject, two things compared, layers, a timeline, a process, a study plan, a set of pictures: each gets its own layout.
 - **Pages you can use, not just read.** Flip a flashcard, answer a quiz, or tap any part of a page to go deeper.
+- **Pictures say what they show.** When a page shows several things, each picture shows one of them and carries its name.
 - **Ask about a picture.** Attach a photo of an object, a homework problem or a chart. Folio works out what it is and builds the page around it.
 - **It remembers you.** Say "I'm in ninth grade" or "use more analogies" once, and later pages follow. You can see and delete what it remembers under Memory.
 - **Nothing gets lost.** Follow-ups keep the earlier pages, and the back button leafs through them. Every conversation is saved with its pictures, so you can reopen it from History later, on any device.
@@ -84,7 +85,8 @@ These are read by `docker compose`. Put them in `.env` or in front of the comman
 6. **Attached pictures.** The text model cannot see, so a vision model first describes the picture in words, and the text model lays out the page from that. The picture itself is placed on the page as it is.
 7. **History.** The image service's links expire, so the server keeps a copy of each picture when it reads its colors. After each page, the browser hands the conversation to the server to store ([`internal/library`](internal/library/library.go)). Every page is also a browser history entry, which is why the back button and reload work.
 8. **Memory.** When you say something lasting about yourself, the model writes a "remember" line. The server stores it, the page shows a notice you can undo, and it is added to the system prompt from then on.
-9. **Language.** The server decides the page's language from the question and tells the model outright. The prompt itself is written in Chinese, since the default text model follows it best that way.
+9. **Caching.** Every call starts with the same long system prompt, which Volcengine caches automatically on the Chat API. In testing, 95 to 98 percent of input tokens were read from the cache. The server logs the figure for each page.
+10. **Language.** The server decides the page's language from the question and tells the model outright. The prompt itself is written in Chinese, since the default text model follows it best that way.
 
 ## Development
 
@@ -97,7 +99,7 @@ make dev                      # in another terminal: front end with hot reload
 make test
 ```
 
-Add `?mock` to the address to see the layouts with built-in sample pages (in Chinese) without calling a model. `?lang=en` or `?lang=zh` forces the interface language, and `?timing` shows how long each stage took.
+Add `?mock` to the address to see the layouts with built-in sample pages (in Chinese) without calling a model. `?lang=en` or `?lang=zh` forces the interface language, and `?timing` shows how long each stage took and how much of the input was served from the cache.
 
 ## Known limits
 

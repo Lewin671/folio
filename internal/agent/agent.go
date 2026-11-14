@@ -216,6 +216,11 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			wantsImage = false
 			delete(op, "prompt")
 		}
+		// A picture block that will get no picture would only leave an empty
+		// frame on the page, so it is left out.
+		if kind, _ := op["kind"].(string); t == "image" && !wantsImage && !keep && kind != "upload" {
+			return
+		}
 		if wantsImage {
 			op["pending"] = true
 		}
@@ -279,7 +284,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	err := a.Ark.ChatStream(ctx, a.TextModel, msgs, 1400, func(delta string) {
+	used, err := a.Ark.ChatStream(ctx, a.TextModel, msgs, 1400, func(delta string) {
 		for _, line := range lines.feed(delta) {
 			handle(line)
 		}
@@ -297,7 +302,12 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	} else if nOps == 0 && ctx.Err() == nil {
 		out.send("error", map[string]any{"message": say(lang, "Nothing came out this time. Try asking another way.", "这次没有生成出内容，请换个说法再试。")})
 	}
-	out.send("scene_done", map[string]any{"ms": since(), "ops": nOps})
+	// How much of the input the service already had cached; the long system
+	// prompt should make this most of it on every call after the first.
+	if used.Input > 0 {
+		log.Printf("tokens: input %d (cached %d, %d%%), output %d", used.Input, used.Cached, used.Cached*100/used.Input, used.Output)
+	}
+	out.send("scene_done", map[string]any{"ms": since(), "ops": nOps, "input_tokens": used.Input, "cached_tokens": used.Cached, "output_tokens": used.Output})
 	wg.Wait()
 	out.send("end", map[string]any{"ms": since()})
 }

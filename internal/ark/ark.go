@@ -27,7 +27,13 @@ func New(key, base string) *Client {
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	return &Client{key: key, base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 120 * time.Second}}
+	// A connection that has silently died (a proxy restarting, a laptop waking
+	// up) would otherwise be reused for every call until the system gave up on
+	// it, minutes later. Pinging it when it goes quiet drops it within seconds.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.HTTP2 = &http.HTTP2Config{SendPingTimeout: 10 * time.Second, PingTimeout: 5 * time.Second}
+	tr.IdleConnTimeout = 60 * time.Second
+	return &Client{key: key, base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 120 * time.Second, Transport: tr}}
 }
 
 type Message struct {
@@ -145,17 +151,31 @@ func (c *Client) CheckImage(ctx context.Context, model string) error {
 
 // ChatStream streams a completion with thinking disabled and calls onDelta
 // for every content fragment.
-func (c *Client) ChatStream(ctx context.Context, model string, msgs []Message, maxTokens int, onDelta func(string)) error {
+// Usage is what a chat call consumed. Cached counts the input tokens the
+// service recognised from an earlier call and bills at the lower cached rate.
+type Usage struct {
+	Input, Cached, Output int
+}
+
+// promptCacheKey keeps calls that share the long system prompt on servers
+// that already hold it. Caching itself is automatic; this only improves the
+// odds of a hit.
+const promptCacheKey = "folio-pages-v1"
+
+func (c *Client) ChatStream(ctx context.Context, model string, msgs []Message, maxTokens int, onDelta func(string)) (Usage, error) {
+	var used Usage
 	resp, err := c.post(ctx, "/chat/completions", model, map[string]any{
-		"model":       model,
-		"messages":    msgs,
-		"stream":      true,
-		"max_tokens":  maxTokens,
-		"temperature": 0.8,
-		"thinking":    map[string]string{"type": "disabled"},
+		"model":            model,
+		"messages":         msgs,
+		"stream":           true,
+		"stream_options":   map[string]bool{"include_usage": true},
+		"prompt_cache_key": promptCacheKey,
+		"max_tokens":       maxTokens,
+		"temperature":      0.8,
+		"thinking":         map[string]string{"type": "disabled"},
 	})
 	if err != nil {
-		return err
+		return used, err
 	}
 	defer resp.Body.Close()
 
@@ -177,15 +197,29 @@ func (c *Client) ChatStream(ctx context.Context, model string, msgs []Message, m
 					Content string `json:"content"`
 				} `json:"delta"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				Details          struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
+			} `json:"usage"`
 		}
-		if json.Unmarshal([]byte(data), &chunk) != nil || len(chunk.Choices) == 0 {
+		if json.Unmarshal([]byte(data), &chunk) != nil {
+			continue
+		}
+		// The last chunk carries the totals and no text.
+		if u := chunk.Usage; u != nil {
+			used = Usage{Input: u.PromptTokens, Cached: u.Details.CachedTokens, Output: u.CompletionTokens}
+		}
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 		if d := chunk.Choices[0].Delta.Content; d != "" {
 			onDelta(d)
 		}
 	}
-	return sc.Err()
+	return used, sc.Err()
 }
 
 // Vision asks a question about one or more images (URLs or data URLs) and
