@@ -92,3 +92,14 @@ func TestEdgeStops(t *testing.T) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
+
+func TestPageLang(t *testing.T) {
+	for q, want := range map[string]string{"How do jellyfish swim?": "en", "水母怎么游泳": "zh", "讲讲 GPU": "zh", "123?": "zh", "Was ist das?": "en"} {
+		if got := pageLang(q, "zh"); got != want {
+			t.Errorf("pageLang(%q) = %s, want %s", q, got, want)
+		}
+	}
+	if got := pageLang("…", "en"); got != "en" {
+		t.Errorf("no letters should fall back to the interface language, got %s", got)
+	}
+}

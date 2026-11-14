@@ -125,7 +125,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	since := func() int64 { return time.Since(start).Milliseconds() }
 	out.send("meta", map[string]any{"text_model": a.TextModel, "image_model": a.ImageModel})
 
-	msgs := []ark.Message{{Role: "system", Content: systemPrompt + languageNote(lang) + profileNote(a.Profile.Get())}}
+	msgs := []ark.Message{{Role: "system", Content: systemPrompt + languageNote(pageLang(req.Input, lang)) + profileNote(a.Profile.Get())}}
 	for _, t := range req.History {
 		lines := make([]string, len(t.Ops))
 		for i, op := range t.Ops {

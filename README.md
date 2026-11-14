@@ -1,105 +1,114 @@
 # Folio
 
-问什么，都给你排一页。它不回一段聊天文字，而是按问题的形状现排一页界面：版式、配色、字体气质和图片都当场生成。
+**English** · [简体中文](README.zh-CN.md)
 
-[![演示视频](docs/subject.jpg)](docs/demo.mp4)
+Ask anything. Get a page.
 
-▶ [看 90 秒演示视频](docs/demo.mp4)（真实操作录屏；等待出图的部分做了加速，画面右上角有标注）
+Folio answers a question with a page instead of a chat message. The layout, colors, type and pictures are composed on the spot to fit what you asked, and no two questions get the same page.
 
-| 辨析两个东西 | 有层次的东西 | 一段历史 |
+[![Folio composing pages for four different questions](docs/demo.gif)](docs/demo.mp4)
+
+▶ [Watch the 2-minute demo](docs/demo.mp4). It is a recording of the real app; the waits for pictures are sped up and labeled on screen.
+
+| Two things compared | Something with layers | A stretch of history |
 |---|---|---|
-| ![对比](docs/compare.jpg) | ![分层](docs/layers.jpg) | ![时间线](docs/timeline.jpg) |
+| ![Comparison](docs/compare.jpg) | ![Layers](docs/layers.jpg) | ![Timeline](docs/timeline.jpg) |
 
-| 记忆卡和小测验 | 附一张图，问它是什么 |
-|---|---|
-| ![自测](docs/study.jpg) | ![看图讲解](docs/photo.jpg) |
+| Flashcards and a quiz | A picture you took | Every page is kept |
+|---|---|---|
+| ![Quiz](docs/study.jpg) | ![Picture question](docs/photo.jpg) | ![History](docs/history.jpg) |
 
-## 它能做什么
+## What it does
 
-- **每个问题一页不同的界面**：讲一个东西、辨析两个概念、分层结构、历史时间线、原理步骤、学习路线、风格图集，各有各的版式。
-- **能操作，不只是能看**：记忆卡点一下翻面，小测验点选作答，页面上的每个部分都可以点开让它展开讲。
-- **能翻回去，也能下次再看**：追问之后，之前的页面还在，用顶栏的箭头、浏览器的后退键或手机的侧滑返回翻页。问过的内容连同图片存在服务端，关掉网页后可以从「历史」里重新打开、接着问，换一台设备也看得到。
-- **附一张图提问**：拍一个东西、一道题或一张图表，它先看懂，再排一页讲给你。
-- **记得你是谁**：说过“我是初中生”“多用比喻讲”，之后的讲解会照着来。记住的内容可以在「记忆」里查看、删除。
+- **A different page for every question.** One subject, two things compared, layers, a timeline, a process, a study plan, a set of pictures: each gets its own layout.
+- **Pages you can use, not just read.** Flip a flashcard, answer a quiz, or tap any part of a page to go deeper.
+- **Ask about a picture.** Attach a photo of an object, a homework problem or a chart. Folio works out what it is and builds the page around it.
+- **It remembers you.** Say "I'm in ninth grade" or "use more analogies" once, and later pages follow. You can see and delete what it remembers under Memory.
+- **Nothing gets lost.** Follow-ups keep the earlier pages, and the back button leafs through them. Every conversation is saved with its pictures, so you can reopen it from History later, on any device.
+- **English and Chinese.** The interface follows your browser language and can be switched in the header. Each page is written in the language you ask in.
 
-内容由模型生成，可能有误。页面底部有提示，重要信息请自行核实。
+Pages are written by an AI model and can be wrong. Check anything important.
 
-## 运行
+## Run it
 
-需要 Docker 和一个火山方舟的 API Key。
+You need Docker and an API key for [Volcengine Ark](https://www.volcengine.com/product/ark), the model service Folio runs on.
 
 ```sh
 git clone https://github.com/Lewin671/folio.git && cd folio
-cp .env.example .env        # 打开 .env，填上 ARK_API_KEY
+cp .env.example .env        # open .env and fill in ARK_API_KEY
 docker compose up -d
 ```
 
-然后打开 <http://localhost:8787>。
+Then open <http://localhost:8787>.
 
-### 准备火山方舟的 Key
+### Getting a Volcengine Ark key
 
-1. 在[火山方舟控制台](https://console.volcengine.com/ark)的「API Key 管理」里创建一个 API Key。
-2. 在「开通管理」里开通下面三个模型（可以用环境变量换成别的）：
+Volcengine is ByteDance's cloud. Its console is in Chinese, so the Chinese names of the two pages you need are given below.
 
-| 用途 | 环境变量 | 默认模型 |
+1. In the [Ark console](https://console.volcengine.com/ark), create a key under **API Key 管理** (API Key Management).
+2. Under **开通管理** (Model Activation), activate the three models below. You can point Folio at other models with the environment variables.
+
+| Used for | Variable | Default |
 |---|---|---|
-| 排版和文案 | `TEXT_MODEL` | `deepseek-v4-1-flash-261017` |
-| 出图 | `IMAGE_MODEL` | `doubao-seedream-5-0-flash-260915` |
-| 看懂附图 | `VISION_MODEL` | `doubao-seed-2-0-mini-260428` |
+| Layout and writing | `TEXT_MODEL` | `deepseek-v4-1-flash-261017` |
+| Pictures | `IMAGE_MODEL` | `doubao-seedream-5-0-flash-260915` |
+| Reading attached pictures | `VISION_MODEL` | `doubao-seed-2-0-mini-260428` |
 
-Key 无效或模型没开通时，首页会直接告诉你缺什么，`docker compose logs` 里也有同样的提示。
+If the key is wrong or a model is not activated, the home page says what is missing. `docker compose logs` shows the same message.
 
-每一页会调用一次文本模型和零到三次出图，附图提问会多调用一次视觉模型，费用按火山方舟的价格由你的账号承担。
+Each page costs one call to the text model and up to four pictures; a question with an attached picture adds one vision call. Volcengine bills these to your account.
 
-### 其他配置
+### Other settings
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | What it does |
 |---|---|---|
-| `BIND` | `127.0.0.1` | 监听地址。设为 `0.0.0.0` 可让局域网里的手机访问，见下面的安全说明 |
-| `PORT` | `8787` | 本机端口 |
-| `NPM_REGISTRY` | 官方源 | 构建镜像时用的 npm 源。国内可设为 `https://registry.npmmirror.com` |
+| `BIND` | `127.0.0.1` | Address to listen on. Set `0.0.0.0` to reach it from your phone on the same network; read the security notes first. |
+| `PORT` | `8787` | Port on your machine. |
+| `NPM_REGISTRY` | npm's own | Registry used while building the image. In mainland China, `https://registry.npmmirror.com` is faster. |
 
-这几个是给 `docker compose` 用的，写在 `.env` 里或放在命令前面都可以。
+These are read by `docker compose`. Put them in `.env` or in front of the command.
 
-## 隐私和安全
+## Privacy and security
 
-- 记忆、问过的页面、生成的图片和你附的图片都只存在运行它的机器上（Docker 卷 `folio-data`），可以在「历史」和「记忆」里删除。记忆每次提问时会一起发给模型；附的图片在当次提问时发给火山方舟的模型。
-- **没有登录**。能访问这个地址的人都能看到和删除历史与记忆，也会消耗你的 Key。默认只监听本机；如果要开放给局域网，请确认网络里都是你信任的人，不要直接暴露到公网。
-- 提示词要求模型不生成真实人物的肖像、不识别照片里的人是谁；这是对模型的要求，不是技术上的强制。
+- Memory, your pages, the generated pictures and the pictures you attach are stored only on the machine running Folio, in the Docker volume `folio-data`. You can delete them under History and Memory. Memory is sent to the model with every question; an attached picture is sent to Volcengine's models for that question.
+- **There is no login.** Anyone who can open the address can read and delete your history and memory, and spend your key. By default Folio only listens on your own machine. Open it to a network only if you trust everyone on it, and never expose it to the internet as it is.
+- The prompt tells the model not to draw real people and not to identify anyone in a photo. That is an instruction to the model, not something the code enforces.
 
-## 工作原理
+## How it works
 
-1. **界面描述语言**：文本模型按行输出 JSON。第一行是场景（版式、字体气质、舞台色、标题），之后每行一个内容块。完整的规则在 [`internal/agent/prompt.md`](internal/agent/prompt.md)。
-2. **流式渲染**：Go 服务每收到完整的一行就通过 SSE 推给浏览器，带出图提示词的块同时并行发起出图。首块约 1.5 秒出现，整页文字约 3–4 秒，图片约 10 秒。
-3. **不抠图也能让主体站在页面上**：图片直接拍在场景色的无缝背景纸上，服务端读取图片左右边缘的颜色，页面按同样的高度铺上这组颜色（[`internal/agent/sample.go`](internal/agent/sample.go)）。实景类的图片没有背景纸，改用圆角画框展示。
-4. **版式由内容决定**：前端按实际到达的块选择构图，模型输出任何组合都有地方放。
-5. **多轮**：模型重发整页并沿用块的 id，前端原地变形；图片可以标记为保留，或在上一张的基础上修改。
-6. **附图**：文本模型看不了图，所以先由视觉模型把图片转成文字描述，再交给文本模型排版；用户的原图由浏览器直接放进版面。
-7. **历史**：图片服务的链接过一段时间会失效，所以服务端在取色时顺手把图片存下来，页面里用的是本机地址；每排完一页，浏览器把整段对话的页面交给服务端保存（[`internal/library`](internal/library/library.go)）。每一页对应一条浏览器历史记录，所以后退键和刷新都能回到原来的页面。
-8. **记忆**：模型遇到长期有效的信息时输出一行“记住”，服务端存盘并通知页面显示可撤销的提示，之后每轮都把记忆拼进系统提示词。
+1. **A small language for pages.** The text model writes one JSON object per line. The first line is the scene (layout, tone, stage color, title); each line after it is one block. The full rules are in [`internal/agent/prompt.md`](internal/agent/prompt.md).
+2. **Streaming.** The Go server forwards each complete line to the browser over SSE as soon as it arrives, and starts generating a picture for every block that asks for one, in parallel. The first block shows after about 1.5 seconds, the full text after 3 to 4, and pictures after about 10.
+3. **Subjects that stand on the page, without cutting them out.** Pictures are generated on a seamless backdrop in the scene color. The server reads the colors along the picture's left and right edges, and the page paints the same colors at the same heights ([`internal/agent/sample.go`](internal/agent/sample.go)). Pictures of places have no backdrop and are shown in a frame instead.
+4. **Layout follows content.** The browser picks a composition from the blocks that actually arrive, so whatever combination the model writes has a place to go.
+5. **Follow-ups.** The model writes the whole page again and reuses block ids, so the page changes in place. A picture can be kept, or edited from the previous one.
+6. **Attached pictures.** The text model cannot see, so a vision model first describes the picture in words, and the text model lays out the page from that. The picture itself is placed on the page as it is.
+7. **History.** The image service's links expire, so the server keeps a copy of each picture when it reads its colors. After each page, the browser hands the conversation to the server to store ([`internal/library`](internal/library/library.go)). Every page is also a browser history entry, which is why the back button and reload work.
+8. **Memory.** When you say something lasting about yourself, the model writes a "remember" line. The server stores it, the page shows a notice you can undo, and it is added to the system prompt from then on.
+9. **Language.** The server decides the page's language from the question and tells the model outright. The prompt itself is written in Chinese, since the default text model follows it best that way.
 
-## 开发
+## Development
 
-需要 Go 1.25、Node 22 和 pnpm。
+You need Go 1.25, Node 22 and pnpm.
 
 ```sh
 export ARK_API_KEY=...
 make build && ./folio         # http://127.0.0.1:8787
-make dev                      # 另开一个终端：前端热更新
+make dev                      # in another terminal: front end with hot reload
 make test
 ```
 
-在地址后加 `?mock` 可以用内置的假数据看各种版式，不调用模型。
+Add `?mock` to the address to see the layouts with built-in sample pages (in Chinese) without calling a model. `?lang=en` or `?lang=zh` forces the interface language, and `?timing` shows how long each stage took.
 
-## 已知的不足
+## Known limits
 
-- **事实可能出错**。提示词要求只讲有把握的内容，但模型仍会讲错或讲得过于肯定，没有联网核实。
-- 图片要等十秒左右，这段时间页面先出文字，图片位置是占位。图片里不能有文字标注，所以做不了带标注的示意图。
-- 只支持一位用户。
-- 中文大标题用的是系统自带的宋体，安卓上没有，会显示成黑体。
+- **Facts can be wrong.** The prompt asks the model to stick to what it is sure of, but it still makes mistakes and can sound more certain than it should. Nothing is checked against the web.
+- Pictures take about ten seconds. The text comes first and a placeholder holds the picture's place. Pictures cannot carry text labels, so there are no annotated diagrams.
+- One user per installation.
+- Questions in languages other than English and Chinese get an English page.
+- Chinese display type uses the system's Songti, which Android does not have; titles fall back to a sans-serif there.
 
-## 致谢与许可
+## Credits and license
 
-界面思路受 Google Design 的概念片 “The Next Interface” 启发。演示和封面里的图片都是 AI 生成的。
+The idea comes from Google Design's concept film "The Next Interface". Every picture in the demo and on the cover is AI-generated.
 
 [MIT](LICENSE)
