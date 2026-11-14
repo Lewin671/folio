@@ -9,9 +9,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/Lewin671/folio/internal/agent"
 	"github.com/Lewin671/folio/internal/ark"
+	"github.com/Lewin671/folio/internal/library"
 	"github.com/Lewin671/folio/internal/profile"
 )
 
@@ -33,12 +35,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("profile store: %v", err)
 	}
+	lib, err := library.Open(env("DATA_DIR", "data"))
+	if err != nil {
+		log.Fatalf("library: %v", err)
+	}
+	go lib.Sweep(24 * time.Hour)
 	a := &agent.Agent{
 		Ark:         ark.New(key, os.Getenv("ARK_BASE_URL")),
 		TextModel:   env("TEXT_MODEL", "deepseek-v4-1-flash-261017"),
 		ImageModel:  env("IMAGE_MODEL", "doubao-seedream-5-0-flash-260915"),
 		VisionModel: env("VISION_MODEL", "doubao-seed-2-0-mini-260428"),
 		Profile:     store,
+		Library:     lib,
 		Debug:       os.Getenv("DEBUG") != "",
 	}
 	web, err := fs.Sub(dist, "web/dist")
@@ -50,6 +58,11 @@ func main() {
 	mux.HandleFunc("GET /api/profile", a.HandleProfile)
 	mux.HandleFunc("DELETE /api/profile", a.HandleClearProfile)
 	mux.HandleFunc("DELETE /api/pref/{id}", a.HandleDeletePref)
+	mux.HandleFunc("GET /api/threads", a.HandleThreads)
+	mux.HandleFunc("GET /api/threads/{id}", a.HandleThread)
+	mux.HandleFunc("PUT /api/threads/{id}", a.HandleSaveThread)
+	mux.HandleFunc("DELETE /api/threads/{id}", a.HandleDeleteThread)
+	mux.HandleFunc("GET /api/img/{name}", a.HandleImage)
 	mux.HandleFunc("GET /api/setup", a.HandleSetup)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("/", http.FileServerFS(web))

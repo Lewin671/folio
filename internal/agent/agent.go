@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Lewin671/folio/internal/ark"
+	"github.com/Lewin671/folio/internal/library"
 	"github.com/Lewin671/folio/internal/profile"
 )
 
@@ -55,6 +56,7 @@ type Agent struct {
 	ImageModel  string
 	VisionModel string         // puts an attached picture into words
 	Profile     *profile.Store // what is remembered about the user
+	Library     *library.Store // earlier pages and their pictures
 	Debug       bool           // log every line the text model writes
 }
 
@@ -146,7 +148,12 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		question = fmt.Sprintf("%s\n\n（用户附了一张图片。图片里是：%s）", req.Input, seen)
-		out.send("seen", map[string]any{"text": question})
+		// The picture is kept so the page still shows it when reopened later.
+		kept, err := a.keepUpload(req.Image)
+		if err != nil {
+			log.Printf("keep upload: %v", err)
+		}
+		out.send("seen", map[string]any{"text": question, "url": kept})
 	}
 	msgs = append(msgs, ark.Message{Role: "user", Content: question})
 
@@ -228,7 +235,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		}
 		var refs []string
 		if edit, _ := op["edit"].(bool); edit {
-			if ref := req.Images[id]; validRef(ref) {
+			if ref := a.editRef(req.Images[id]); ref != "" {
 				refs = []string{ref}
 			}
 		}
@@ -251,11 +258,20 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			// A picture without stops still shows, on the colour the model asked for.
+			// The picture is copied here, because the service's link stops working
+			// after a while and the page should still open later. If the copy
+			// fails the page shows the original link, on the colour the model asked for.
 			var stops []string
-			if !style.framed {
-				if stops, err = fetchStops(ictx, u); err != nil {
-					log.Printf("sample %s: %v", id, err)
+			if data, err := fetchPicture(ictx, u); err != nil {
+				log.Printf("fetch %s: %v", id, err)
+			} else {
+				if !style.framed {
+					stops = stopsOf(data)
+				}
+				if local, err := a.Library.SaveImage(data); err != nil {
+					log.Printf("keep %s: %v", id, err)
+				} else {
+					u = local
 				}
 			}
 			out.send("image", map[string]any{"id": id, "url": u, "stops": stops, "ms": since(), "took_ms": time.Since(t0).Milliseconds()})
@@ -326,8 +342,8 @@ func parseOp(line string) (map[string]any, bool) {
 	return op, true
 }
 
-// validRef only lets image URLs issued by Volcengine storage be used as edit
-// references, so a client cannot make the image service fetch arbitrary URLs.
+// validRef only lets image URLs issued by Volcengine storage be fetched, so a
+// client cannot make this server or the image service fetch arbitrary URLs.
 func validRef(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" {

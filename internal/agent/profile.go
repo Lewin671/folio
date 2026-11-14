@@ -70,7 +70,7 @@ func profileNote(p profile.Profile) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n\n## 用户档案（当前用户）\n\n")
+	b.WriteString("\n\n## 关于用户的记忆\n\n")
 	for _, pref := range p.Prefs {
 		fmt.Fprintf(&b, "- %s\n", pref.Text)
 	}

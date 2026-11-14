@@ -7,8 +7,10 @@ export type Profile = { prefs: Pref[] };
 
 export const EMPTY: Profile = { prefs: [] };
 
-async function call<T>(path: string, method = "GET"): Promise<T> {
-  const res = await fetch(path, { method });
+export type ThreadMeta = { id: string; title: string; updated: string; count: number };
+
+async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+  const res = await fetch(path, body === undefined ? { method } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "出错了，请再试一次。");
   return data as T;
@@ -19,6 +21,10 @@ export const api = {
   profile: () => call<Profile>("/api/profile"),
   clear: () => call<Profile>("/api/profile", "DELETE"),
   deletePref: (id: string) => call<Profile>(`/api/pref/${id}`, "DELETE"),
+  threads: () => call<{ threads: ThreadMeta[] }>("/api/threads"),
+  thread: (id: string) => call<ThreadMeta & { pages: any[] }>(`/api/threads/${id}`),
+  saveThread: (id: string, title: string, pages: unknown[]) => call<{ ok: boolean }>(`/api/threads/${id}`, "PUT", { title, pages }),
+  deleteThread: (id: string) => call<{ threads: ThreadMeta[] }>(`/api/threads/${id}`, "DELETE"),
 };
 
 /**
@@ -45,16 +51,15 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
 
   return (
     <motion.div className="sheet-scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.aside className="panel" role="dialog" aria-modal aria-label="档案" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} onClick={(e) => e.stopPropagation()}>
+      <motion.aside className="panel" role="dialog" aria-modal aria-label="记忆" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>档案</h2>
+          <h2>记忆</h2>
           <button type="button" onClick={onClose} aria-label="关闭">
             关闭
           </button>
         </header>
 
         <section>
-          <h3>记住的事</h3>
           {profile.prefs.length === 0 ? (
             <p className="panel-note">还没有。你提到的背景和偏好会记在这里，比如“我是初中生”“多用比喻讲”，之后的讲解会照着来。</p>
           ) : (
@@ -74,7 +79,7 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
         {error && <p className="panel-error" role="alert">{error}</p>}
 
         <footer>
-          <p className="panel-note">这些只存在运行这个应用的电脑上，每次提问时会一起发给模型。你附的图片不会保存。</p>
+          <p className="panel-note">这些只存在运行这个应用的电脑上，每次提问时会一起发给模型。</p>
           {profile.prefs.length > 0 && (
             <button
               type="button"
@@ -85,7 +90,7 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
                 run(api.clear());
               }}
             >
-              {armed ? "再点一次，全部忘掉" : "清空档案"}
+              {armed ? "再点一次，全部忘掉" : "全部忘掉"}
             </button>
           )}
         </footer>

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
@@ -50,8 +51,8 @@ func backdrop(hex, name string) string {
 	return "warm stone grey (#8C857B)"
 }
 
-// fetchStops downloads a generated picture and reports its backdrop colour.
-func fetchStops(ctx context.Context, raw string) ([]string, error) {
+// fetchPicture downloads a generated picture, so it can be kept and measured.
+func fetchPicture(ctx context.Context, raw string) ([]byte, error) {
 	if !validRef(raw) {
 		return nil, fmt.Errorf("not a generated image url")
 	}
@@ -67,11 +68,16 @@ func fetchStops(ctx context.Context, raw string) ([]string, error) {
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %d", res.StatusCode)
 	}
-	img, _, err := image.Decode(io.LimitReader(res.Body, 12<<20))
+	return io.ReadAll(io.LimitReader(res.Body, 12<<20))
+}
+
+// stopsOf reports the backdrop colour of a picture, or nil if it cannot be read.
+func stopsOf(data []byte) []string {
+	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	return edgeStops(img, backdropStops), nil
+	return edgeStops(img, backdropStops)
 }
 
 // edgeStops reads the colour along the left and right edges of a picture at n

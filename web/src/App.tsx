@@ -6,6 +6,7 @@ import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
 import { COVERS } from "./covers";
 import { api, EMPTY, ProfilePanel, Toasts, toJpeg, type Profile, type Toast } from "./profile";
+import { HistoryPanel } from "./history";
 
 // Shown on the cover as headlines; each leads to a different kind of page.
 const SUGGESTIONS = ["水母没有大脑，怎么游泳", "拿铁和卡布奇诺有什么不同", "大气层分哪几层", "罗马帝国是怎么衰落的", "复利是怎么回事", "考考我太阳系"];
@@ -23,27 +24,40 @@ type State = {
   history: Turn[];
   timing: Timing;
   error: string;
-  pages: Page[]; // every page made so far, oldest first
+  thread: string; // the conversation these pages belong to, as saved on the server
+  pages: Page[]; // every page of this conversation, oldest first
   at: number; // which of them is showing; -1 is the cover
+  rev: number; // goes up whenever the pages change and need saving
 };
 
 /** A finished page, kept so the reader can leaf back to it. */
 type Page = { head: Head; blocks: Op[]; images: Record<string, Img>; history: Turn[] };
 
-const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "", pages: [], at: -1 };
+const initial: State = { head: null, blocks: [], stale: new Set(), images: {}, busy: false, asking: "", attached: "", seen: "", turnOps: [], history: [], timing: {}, error: "", thread: "", pages: [], at: -1, rev: 0 };
 
-type Action = { type: "start"; input: string; image?: string } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "go"; to: number };
+type Action = { type: "start"; input: string; image?: string; thread: string } | { type: "open"; thread: string; pages: Page[]; to: number } | { type: "event"; e: StreamEvent } | { type: "finish"; input: string; failed?: boolean } | { type: "go"; to: number };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "go": {
       // Leafing to another page drops whatever was in progress; the pages themselves stay.
       const page = s.pages[a.to];
-      if (!page) return { ...initial, pages: s.pages };
-      return { ...initial, pages: s.pages, at: a.to, head: page.head, blocks: page.blocks, images: page.images, history: page.history };
+      const kept = { ...initial, thread: s.thread, pages: s.pages, rev: s.rev };
+      if (!page) return kept;
+      return { ...kept, at: a.to, head: page.head, blocks: page.blocks, images: page.images, history: page.history };
+    }
+
+    case "open": {
+      // A conversation from the history replaces the one that was showing.
+      const kept = { ...initial, thread: a.thread, pages: a.pages, rev: s.rev };
+      const page = a.pages[a.to];
+      if (!page) return kept;
+      return { ...kept, at: a.to, head: page.head, blocks: page.blocks, images: page.images, history: page.history };
     }
 
     case "start":
+      // Asking from the cover begins a new conversation.
+      if (a.thread !== s.thread) s = { ...s, thread: a.thread, pages: [], at: -1 };
       return { ...s, busy: true, asking: a.input, attached: a.image ?? "", seen: "", error: "", timing: {}, turnOps: [], stale: new Set(s.blocks.map((b) => b.id)) };
 
     case "finish": {
@@ -56,14 +70,15 @@ function reducer(s: State, a: Action): State {
       // A new page goes after the one it was asked from; pages that came after that one are dropped.
       const made = s.head && s.turnOps.length > 0;
       const pages = made ? [...s.pages.slice(0, s.at + 1), { head: s.head!, blocks, images, history }] : s.pages;
-      return { ...s, busy: false, asking: "", images, history, stale: new Set(), blocks, pages, at: made ? pages.length - 1 : s.at };
+      return { ...s, busy: false, asking: "", images, history, stale: new Set(), blocks, pages, at: made ? pages.length - 1 : s.at, rev: made ? s.rev + 1 : s.rev };
     }
 
     case "event": {
       const { event, data } = a.e;
       switch (event) {
         case "seen":
-          return { ...s, seen: String(data.text ?? "") };
+          // The server keeps the attached picture; its address replaces the local copy.
+          return { ...s, seen: String(data.text ?? ""), attached: typeof data.url === "string" && data.url ? data.url : s.attached };
         case "first":
           return { ...s, timing: { ...s.timing, first: data.ms } };
         case "scene_done":
@@ -117,8 +132,8 @@ function applyOp(s: State, op: Op): State {
   return { ...s, turnOps, asking: "", stale, blocks: [...fresh, op, ...old], images };
 }
 
-// Pages live in memory only, so browser history entries from before a reload point at nothing.
-const SESSION = Math.random().toString(36).slice(2);
+const newThread = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const clip = (text: string, n: number) => (text.length > n ? text.slice(0, n) + "…" : text);
 
 /** Resolves once the browser has the picture, so it can appear together with its colour field. */
 const preload = (url: string) =>
@@ -136,7 +151,7 @@ export function App() {
   const [cover] = useState(() => COVERS[Math.floor(Math.random() * COVERS.length)]);
   const [profile, setProfile] = useState<Profile>(EMPTY);
   const [problems, setProblems] = useState<string[]>([]); // what is missing in the setup, if anything
-  const [panel, setPanel] = useState(false);
+  const [panel, setPanel] = useState<"" | "memory" | "history">("");
   const [attach, setAttach] = useState(""); // a picture waiting to be sent with the next question
   const [toasts, setToasts] = useState<Toast[]>([]);
   const picker = useRef<HTMLInputElement>(null);
@@ -166,37 +181,52 @@ export function App() {
     if (!MOCK) api.setup().then((r) => setProblems(r.problems ?? []), () => {});
   }, []);
 
-  // Each page is a browser history entry, so the back button and the swipe
-  // gesture leaf through pages; the arrows in the top bar do the same.
-  // The entry is added when a question is sent, so going back while the page
-  // is still being made returns to the page it was asked from.
-  const entry = useRef(-1); // the page index the current browser entry stands for
+  // Every move is a browser history entry naming the conversation and the
+  // page, so the back button and the swipe gesture leaf through pages, and a
+  // reload or a later visit to the same entry opens that page again.
+  const pending = useRef(false); // the current entry stands for a page still being made
   const skipPop = useRef(false);
+  function enter(entry: { th?: string; i: number }) {
+    if (pending.current) history.replaceState(entry, "");
+    else history.pushState(entry, "");
+    pending.current = false;
+  }
+  function show(to: number) {
+    abort.current?.abort();
+    enter({ th: state.current.thread, i: to });
+    dispatch({ type: "go", to });
+    window.scrollTo({ top: 0 });
+  }
+  function restore(entry: any) {
+    const cur = state.current;
+    const i = typeof entry?.i === "number" ? entry.i : -1;
+    if (i < 0 || typeof entry?.th !== "string") return dispatch({ type: "go", to: -1 });
+    if (entry.th === cur.thread && cur.pages.length) return dispatch({ type: "go", to: Math.min(i, cur.pages.length - 1) });
+    api.thread(entry.th).then(
+      (t) => dispatch({ type: "open", thread: t.id, pages: t.pages, to: Math.min(i, t.pages.length - 1) }),
+      () => dispatch({ type: "go", to: -1 }),
+    );
+  }
   useEffect(() => {
-    const want = s.busy ? s.at + 1 : s.at;
-    if (want === entry.current) return;
-    if (!s.busy && entry.current === s.at + 1) {
-      // Nothing came of the question: step off the entry that was added for it.
-      skipPop.current = true;
-      entry.current = s.at;
-      history.back();
-      return;
-    }
-    entry.current = want;
-    history.pushState({ folio: SESSION, i: want }, "");
-  }, [s.at, s.busy]);
-  useEffect(() => {
+    if (!MOCK) restore(history.state);
     const onPop = (e: PopStateEvent) => {
       if (skipPop.current) return void (skipPop.current = false);
-      const to = e.state?.folio === SESSION && state.current.pages[e.state.i] ? (e.state.i as number) : -1;
-      entry.current = to;
       abort.current?.abort();
-      dispatch({ type: "go", to });
+      pending.current = false;
+      restore(e.state);
       window.scrollTo({ top: 0 });
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  // Pages are saved on the server after each one is made.
+  useEffect(() => {
+    if (MOCK || !s.rev || !s.thread || !s.pages.length) return;
+    const first = s.pages[0];
+    const title = first.head.title || clip(first.history[first.history.length - 1]?.user ?? "", 40);
+    api.saveThread(s.thread, title, s.pages).catch(() => toast("这一页没能存进历史"));
+  }, [s.rev]);
 
   function toast(text: string, undo?: () => void) {
     const id = Date.now() + Math.random();
@@ -221,8 +251,15 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
     const cur = state.current;
     const images: Record<string, string> = {};
-    for (const [id, img] of Object.entries(cur.images)) if (img.url && /^https:/.test(img.url)) images[id] = img.url;
-    dispatch({ type: "start", input, image });
+    for (const [id, img] of Object.entries(cur.images)) if (img.url && !img.url.startsWith("data:")) images[id] = img.url;
+    // The page being made gets its browser entry now, so going back while it
+    // is still being made returns to the page it was asked from.
+    const thread = cur.at < 0 || !cur.thread ? newThread() : cur.thread;
+    history.pushState({ th: thread, i: cur.at < 0 ? 0 : cur.at + 1 }, "");
+    pending.current = true;
+    let made = false;
+    let placed = cur.at >= 0; // blocks can only be placed once there is a scene
+    dispatch({ type: "start", input, image, thread });
     const ctl = new AbortController();
     abort.current = ctl;
     let failed = false;
@@ -235,7 +272,10 @@ export function App() {
         if (added.length) toast("记住了：" + added.map((p) => p.text).join("、"), () => Promise.all(added.map((p) => api.deletePref(p.id))).then((ps) => ps.length && setProfile(ps[ps.length - 1]), () => {}));
       } else if (e.event === "image" && typeof e.data?.url === "string") {
         loading.push(preload(e.data.url).then(() => void (ctl.signal.aborted || dispatch({ type: "event", e }))));
-      } else dispatch({ type: "event", e });
+      } else {
+        if (e.event === "op") made = (placed ||= e.data?.t === "scene");
+        dispatch({ type: "event", e });
+      }
     };
     try {
       await runTurn({ input, history: cur.history, images, image }, onEvent, ctl.signal);
@@ -244,13 +284,28 @@ export function App() {
       failed = true;
       if (!ctl.signal.aborted) dispatch({ type: "event", e: { event: "error", data: { message: "连接断了，请再试一次。" } } });
     }
-    if (!ctl.signal.aborted) dispatch({ type: "finish", input, failed });
+    if (ctl.signal.aborted) return;
+    dispatch({ type: "finish", input, failed });
+    pending.current = false;
+    if (!made) {
+      // Nothing came of the question: step off the entry that was added for it.
+      skipPop.current = true;
+      history.back();
+    }
   }
 
-  function home() {
-    abort.current?.abort();
-    if (entry.current >= 0 && !s.busy) history.go(-(entry.current + 1));
-    else dispatch({ type: "go", to: -1 });
+  async function openThread(id: string) {
+    try {
+      const t = await api.thread(id);
+      const to = t.pages.length - 1;
+      abort.current?.abort();
+      enter({ th: t.id, i: to });
+      dispatch({ type: "open", thread: t.id, pages: t.pages, to });
+      window.scrollTo({ top: 0 });
+      setPanel("");
+    } catch (e: any) {
+      toast(String(e?.message ?? "打不开这段记录"));
+    }
   }
 
   const waitingFirst = s.busy && !!s.asking;
@@ -267,18 +322,18 @@ export function App() {
 
       <nav className="top">
         <span className="top-left">
-          <button type="button" className="brand" onClick={home} title="回到封面">
+          <button type="button" className="brand" onClick={() => show(-1)} title="回到封面">
             Folio
           </button>
           {s.at >= 0 && s.pages.length > 1 && (
             <span className="pager">
-              <button type="button" onClick={() => history.back()} disabled={s.at === 0 && !s.busy} aria-label="上一页" title="上一页">
+              <button type="button" onClick={() => show(s.busy ? s.at : s.at - 1)} disabled={s.at === 0 && !s.busy} aria-label="上一页" title="上一页">
                 ←
               </button>
               <span className="pager-n">
                 {s.at + 1} / {s.pages.length}
               </span>
-              <button type="button" onClick={() => history.forward()} disabled={s.busy || s.at >= s.pages.length - 1} aria-label="下一页" title="下一页">
+              <button type="button" onClick={() => show(s.at + 1)} disabled={s.busy || s.at >= s.pages.length - 1} aria-label="下一页" title="下一页">
                 →
               </button>
             </span>
@@ -292,12 +347,17 @@ export function App() {
           )}
           {MOCK && <span className="mock-flag">假数据</span>}
           {s.at < 0 && !s.busy && s.pages.length > 0 && (
-            <button type="button" className="profile-btn" onClick={() => history.forward()} aria-label="下一页">
+            <button type="button" className="profile-btn" onClick={() => show(s.pages.length - 1)} aria-label="下一页">
               回到刚才那页 →
             </button>
           )}
-          <button type="button" className="profile-btn" onClick={() => setPanel(true)}>
-            档案
+          {!MOCK && (
+            <button type="button" className="profile-btn" onClick={() => setPanel("history")}>
+              历史
+            </button>
+          )}
+          <button type="button" className="profile-btn" onClick={() => setPanel("memory")}>
+            记忆
           </button>
         </span>
       </nav>
@@ -408,7 +468,21 @@ export function App() {
       </div>
 
       <AnimatePresence>
-        {panel && <ProfilePanel key="panel" profile={profile} onChange={setProfile} onClose={() => setPanel(false)} />}
+        {panel === "memory" && <ProfilePanel key="memory" profile={profile} onChange={setProfile} onClose={() => setPanel("")} />}
+        {panel === "history" && (
+          <HistoryPanel
+            key="history"
+            current={s.thread}
+            onOpen={openThread}
+            onClose={() => setPanel("")}
+            onDeleted={(id) => {
+              if (id !== state.current.thread) return;
+              abort.current?.abort();
+              enter({ i: -1 });
+              dispatch({ type: "open", thread: "", pages: [], to: -1 });
+            }}
+          />
+        )}
       </AnimatePresence>
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((ts) => ts.filter((t) => t.id !== id))} />
     </div>
