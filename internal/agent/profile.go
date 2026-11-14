@@ -17,13 +17,15 @@ import (
 	"github.com/Lewin671/folio/internal/profile"
 )
 
+const lookPromptEN = `Describe this picture in English for an explainer who will use your description to explain it to the user. Say what the main subject is (as specific as you can: species, model, artwork or place; if unsure, say "possibly" and give your reason), which details are worth explaining, and any text that can be read. If it is a problem, a chart or a document, restate its content in full. Do not identify or guess who any real person is; describe only what is visible. At most 130 words. Output only the description.`
+
 const visionTimeout = 40 * time.Second
 
 const lookPrompt = `用中文描述这张图片，供一位讲解员据此为用户讲解。说清：画面的主体是什么（尽量具体到种类、型号、作品或地点；拿不准就说"可能是"并说明依据）、值得讲的细节、画面里能读出的文字。如果是题目、图表或文档，把内容完整转述出来。不要识别或猜测画面中真实人物的身份，只描述其可见特征。不超过 220 字，只输出描述。`
 
 // look puts an attached picture into words for the text model. Only pictures
 // that decode as images are forwarded.
-func (a *Agent) look(ctx context.Context, dataURL string) (string, error) {
+func (a *Agent) look(ctx context.Context, dataURL, lang string) (string, error) {
 	_, b64, ok := strings.Cut(dataURL, ";base64,")
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if !ok || err != nil {
@@ -34,7 +36,7 @@ func (a *Agent) look(ctx context.Context, dataURL string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, visionTimeout)
 	defer cancel()
-	text, err := a.Ark.Vision(ctx, a.VisionModel, lookPrompt, []string{dataURL})
+	text, err := a.Ark.Vision(ctx, a.VisionModel, say(lang, lookPromptEN, lookPrompt), []string{dataURL})
 	if err != nil {
 		return "", err
 	}
@@ -51,9 +53,9 @@ func (a *Agent) HandleProfile(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, a.Profile.Get())
 }
 
-func (a *Agent) HandleClearProfile(w http.ResponseWriter, _ *http.Request) {
+func (a *Agent) HandleClearProfile(w http.ResponseWriter, r *http.Request) {
 	if err := a.Profile.Clear(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "没清掉，请再试一次。"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": say(langOf(r), "Couldn’t clear it. Please try again.", "没清掉，请再试一次。")})
 		return
 	}
 	writeJSON(w, http.StatusOK, a.Profile.Get())
@@ -87,7 +89,7 @@ func clipRunes(s string, n int) string {
 
 // Setup reports what stops the app from working with the configured key and
 // models, in words for the person who started it. An empty list means ready.
-func (a *Agent) Setup(ctx context.Context) []string {
+func (a *Agent) Setup(ctx context.Context, lang string) []string {
 	checks := []struct {
 		model string
 		run   func(context.Context, string) error
@@ -106,8 +108,8 @@ func (a *Agent) Setup(ctx context.Context) []string {
 			defer cancel()
 			if err := c.run(cctx, c.model); err != nil {
 				log.Printf("setup check %s: %v", c.model, err)
-				if problems[i] = ark.Hint(err); problems[i] == "" {
-					problems[i] = fmt.Sprintf("连不上模型 %s，请检查网络。", c.model)
+				if problems[i] = ark.Hint(err, lang); problems[i] == "" {
+					problems[i] = fmt.Sprintf(say(lang, "Can’t reach model %s. Check the network.", "连不上模型 %s，请检查网络。"), c.model)
 				}
 			}
 		}()
@@ -126,5 +128,5 @@ func (a *Agent) Setup(ctx context.Context) []string {
 
 // HandleSetup lets the page tell a first-time user what is missing.
 func (a *Agent) HandleSetup(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"problems": a.Setup(r.Context())})
+	writeJSON(w, http.StatusOK, map[string]any{"problems": a.Setup(r.Context(), langOf(r))})
 }

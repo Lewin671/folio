@@ -58,7 +58,7 @@ func (a *Agent) HandleThreads(w http.ResponseWriter, _ *http.Request) {
 func (a *Agent) HandleThread(w http.ResponseWriter, r *http.Request) {
 	t, err := a.Library.Get(r.PathValue("id"))
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "这段记录已经不在了。"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": say(langOf(r), "That conversation is no longer here.", "这段记录已经不在了。")})
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -72,15 +72,15 @@ func (a *Agent) HandleSaveThread(w http.ResponseWriter, r *http.Request) {
 		Pages json.RawMessage `json:"pages"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxThreadBytes)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "这段记录太大了，没能保存。"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": say(langOf(r), "That conversation is too large to save.", "这段记录太大了，没能保存。")})
 		return
 	}
 	err := a.Library.Put(r.PathValue("id"), clipRunes(body.Title, 60), strings.TrimSpace(body.Bg), body.Img, body.Pages)
 	switch {
 	case errors.Is(err, library.ErrBad):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "没能保存这段记录。"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": say(langOf(r), "Couldn’t save this conversation.", "没能保存这段记录。")})
 	case err != nil:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "没能保存这段记录。"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": say(langOf(r), "Couldn’t save this conversation.", "没能保存这段记录。")})
 	default:
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
@@ -88,7 +88,7 @@ func (a *Agent) HandleSaveThread(w http.ResponseWriter, r *http.Request) {
 
 func (a *Agent) HandleDeleteThread(w http.ResponseWriter, r *http.Request) {
 	if err := a.Library.Delete(r.PathValue("id")); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "没删掉，请再试一次。"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": say(langOf(r), "Couldn’t delete it. Please try again.", "没删掉，请再试一次。")})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"threads": a.Library.List()})

@@ -1,5 +1,6 @@
 import type { Op, StreamEvent, Turn } from "./types";
 import { mockTurn } from "./mock";
+import { LANG } from "./i18n";
 
 export type TurnRequest = { input: string; history: Turn[]; images: Record<string, string>; image?: string };
 
@@ -11,7 +12,7 @@ export async function runTurn(req: TurnRequest, onEvent: (e: StreamEvent) => voi
 
   const res = await fetch("/api/turn", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Folio-Lang": LANG },
     body: JSON.stringify(req),
     signal,
   });

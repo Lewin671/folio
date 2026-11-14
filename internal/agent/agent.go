@@ -91,13 +91,14 @@ func (s *sse) send(event string, data any) {
 
 func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	var req request
+	lang := langOf(r)
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTurnBytes)).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	req.Input = strings.TrimSpace(req.Input)
 	if req.Input == "" && req.Image != "" {
-		req.Input = "这是什么？讲讲它。"
+		req.Input = say(lang, "What is this? Tell me about it.", "这是什么？讲讲它。")
 	}
 	if req.Input == "" {
 		http.Error(w, "empty input", http.StatusBadRequest)
@@ -124,7 +125,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	since := func() int64 { return time.Since(start).Milliseconds() }
 	out.send("meta", map[string]any{"text_model": a.TextModel, "image_model": a.ImageModel})
 
-	msgs := []ark.Message{{Role: "system", Content: systemPrompt + profileNote(a.Profile.Get())}}
+	msgs := []ark.Message{{Role: "system", Content: systemPrompt + languageNote(lang) + profileNote(a.Profile.Get())}}
 	for _, t := range req.History {
 		lines := make([]string, len(t.Ops))
 		for i, op := range t.Ops {
@@ -136,18 +137,18 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	// words; the browser keeps those words as part of the question for later turns.
 	question := req.Input
 	if req.Image != "" {
-		seen, err := a.look(ctx, req.Image)
+		seen, err := a.look(ctx, req.Image, lang)
 		if err != nil {
 			log.Printf("look: %v", err)
-			msg := ark.Hint(err)
+			msg := ark.Hint(err, lang)
 			if msg == "" {
-				msg = "没能看清这张图，请换一张再试。"
+				msg = say(lang, "Couldn’t make out that picture. Please try another.", "没能看清这张图，请换一张再试。")
 			}
 			out.send("error", map[string]any{"message": msg})
 			out.send("end", map[string]any{"ms": since()})
 			return
 		}
-		question = fmt.Sprintf("%s\n\n（用户附了一张图片。图片里是：%s）", req.Input, seen)
+		question = fmt.Sprintf(say(lang, "%s\n\n(The user attached a picture. It shows: %s)", "%s\n\n（用户附了一张图片。图片里是：%s）"), req.Input, seen)
 		// The picture is kept so the page still shows it when reopened later.
 		kept, err := a.keepUpload(req.Image)
 		if err != nil {
@@ -253,7 +254,7 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				log.Printf("image %s: %v", id, err)
 				out.send("image_error", map[string]any{"id": id})
-				if msg := ark.Hint(err); msg != "" {
+				if msg := ark.Hint(err, lang); msg != "" {
 					out.send("error", map[string]any{"message": msg})
 				}
 				return
@@ -288,13 +289,13 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil && ctx.Err() == nil {
 		log.Printf("chat: %v", err)
-		msg := ark.Hint(err)
+		msg := ark.Hint(err, lang)
 		if msg == "" {
-			msg = "模型暂时没有回应，请再试一次。"
+			msg = say(lang, "The model didn’t respond. Please try again.", "模型暂时没有回应，请再试一次。")
 		}
 		out.send("error", map[string]any{"message": msg})
 	} else if nOps == 0 && ctx.Err() == nil {
-		out.send("error", map[string]any{"message": "这次没有生成出内容，请换个说法再试。"})
+		out.send("error", map[string]any{"message": say(lang, "Nothing came out this time. Try asking another way.", "这次没有生成出内容，请换个说法再试。")})
 	}
 	out.send("scene_done", map[string]any{"ms": since(), "ops": nOps})
 	wg.Wait()

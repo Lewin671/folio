@@ -70,7 +70,7 @@ func main() {
 	addr := env("ADDR", "127.0.0.1:8787")
 	log.Printf("folio listening on %s (text=%s image=%s)", addr, a.TextModel, a.ImageModel)
 	go func() {
-		if problems := a.Setup(context.Background()); len(problems) > 0 {
+		if problems := a.Setup(context.Background(), "en"); len(problems) > 0 {
 			for _, p := range problems {
 				log.Printf("SETUP: %s", p)
 			}

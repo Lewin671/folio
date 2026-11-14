@@ -9,7 +9,7 @@ import (
 func TestHint(t *testing.T) {
 	// No key: refused locally, with a hint that says what to fill in.
 	err := New("", "").CheckChat(context.Background(), "m")
-	if h := Hint(err); !strings.Contains(h, "ARK_API_KEY") {
+	if h := Hint(err, "zh"); !strings.Contains(h, "ARK_API_KEY") {
 		t.Fatalf("hint for missing key = %q", h)
 	}
 	for _, c := range []struct {
@@ -21,7 +21,7 @@ func TestHint(t *testing.T) {
 		{&APIError{Status: 429}, "限流"},
 		{&APIError{Status: 500}, ""},
 	} {
-		if got := Hint(c.err); (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
+		if got := Hint(c.err, "zh"); (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
 			t.Errorf("Hint(%d %s) = %q, want it to mention %q", c.err.Status, c.err.Code, got, c.want)
 		}
 	}

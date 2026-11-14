@@ -47,22 +47,30 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("ark %s: %d %s: %s", e.Model, e.Status, e.Code, e.Message)
 }
 
+// say picks the wording for the reader's language; English unless they use Chinese.
+func say(lang, en, zh string) string {
+	if lang == "zh" {
+		return zh
+	}
+	return en
+}
+
 // Hint turns an error into something the person running the app can act on,
 // or "" when the failure is not about their setup.
-func Hint(err error) string {
+func Hint(err error, lang string) string {
 	var e *APIError
 	if !errors.As(err, &e) {
 		return ""
 	}
 	switch {
 	case e.Code == "MissingKey":
-		return "还没有配置 ARK_API_KEY：把火山方舟的 API Key 填进 .env，然后重启。"
+		return say(lang, "ARK_API_KEY isn’t set. Put your Volcengine Ark API key in .env, then restart.", "还没有配置 ARK_API_KEY：把火山方舟的 API Key 填进 .env，然后重启。")
 	case e.Status == http.StatusUnauthorized:
-		return "火山 API Key 无效或已失效，请检查 ARK_API_KEY。"
+		return say(lang, "The Volcengine API key is invalid or expired. Check ARK_API_KEY.", "火山 API Key 无效或已失效，请检查 ARK_API_KEY。")
 	case e.Status == http.StatusNotFound || e.Status == http.StatusForbidden || strings.Contains(e.Code, "ModelNotOpen"):
-		return fmt.Sprintf("模型 %s 用不了：请在火山方舟控制台的「开通管理」里开通它，或者用环境变量换一个模型。", e.Model)
+		return fmt.Sprintf(say(lang, "Model %s isn’t available. Activate it in the Volcengine Ark console, or choose another model with the environment variable.", "模型 %s 用不了：请在火山方舟控制台的「开通管理」里开通它，或者用环境变量换一个模型。"), e.Model)
 	case e.Status == http.StatusTooManyRequests || strings.Contains(e.Code, "Overdue") || strings.Contains(e.Code, "Quota"):
-		return "火山账号被限流、额度用完或欠费了，请到控制台看一下。"
+		return say(lang, "The Volcengine account is rate-limited, out of quota or overdue. Check the console.", "火山账号被限流、额度用完或欠费了，请到控制台看一下。")
 	}
 	return ""
 }

@@ -7,9 +7,10 @@ import { Scene, stageOf } from "./scene";
 import { COVERS } from "./covers";
 import { api, EMPTY, ProfilePanel, Toasts, toJpeg, type Profile, type ThreadMeta, type Toast } from "./profile";
 import { HistoryPanel } from "./history";
+import { switchLang, T } from "./i18n";
 
 // Shown on the cover as headlines; each leads to a different kind of page.
-const SUGGESTIONS = ["水母没有大脑，怎么游泳", "拿铁和卡布奇诺有什么不同", "大气层分哪几层", "罗马帝国是怎么衰落的", "复利是怎么回事", "考考我太阳系"];
+const SUGGESTIONS = T.suggestions;
 
 type State = {
   head: Head | null;
@@ -86,7 +87,7 @@ function reducer(s: State, a: Action): State {
         case "end":
           return { ...s, timing: { ...s.timing, end: data.ms } };
         case "error":
-          return { ...s, error: String(data.message ?? "出错了，请再试一次。") };
+          return { ...s, error: String(data.message ?? T.failed) };
         case "image":
           return { ...s, images: { ...s.images, [data.id]: { url: data.url, stops: Array.isArray(data.stops) ? data.stops.filter(validHex) : undefined, pending: false } }, timing: { ...s.timing, image: data.ms } };
         case "image_error":
@@ -233,7 +234,7 @@ export function App() {
     const id = s.thread;
     api.saveThread(id, { title, bg: first.head.bg, img }, s.pages).then(
       () => setRecent({ id, title, updated: new Date().toISOString(), count: s.pages.length }),
-      () => toast("这一页没能存进历史"),
+      () => toast(T.notSaved),
     );
   }, [s.rev]);
 
@@ -247,13 +248,13 @@ export function App() {
     try {
       setAttach(await toJpeg(file));
     } catch {
-      toast("这张图读不出来，换一张试试");
+      toast(T.badPic);
     }
   }
 
   async function say(raw: string) {
     const image = attach || undefined;
-    const input = raw.trim() || (image ? "这是什么？讲讲它。" : "");
+    const input = raw.trim() || (image ? T.defaultAsk : "");
     if (!input || state.current.busy) return;
     setDraft("");
     setAttach("");
@@ -278,7 +279,7 @@ export function App() {
         // The model noted a lasting preference; show it so it can be taken back.
         const added: { id: string; text: string }[] = Array.isArray(e.data?.added) ? e.data.added : [];
         if (e.data?.profile) setProfile(e.data.profile);
-        if (added.length) toast("记住了：" + added.map((p) => p.text).join("、"), () => Promise.all(added.map((p) => api.deletePref(p.id))).then((ps) => ps.length && setProfile(ps[ps.length - 1]), () => {}));
+        if (added.length) toast(T.remembered(added.map((p) => p.text)), () => Promise.all(added.map((p) => api.deletePref(p.id))).then((ps) => ps.length && setProfile(ps[ps.length - 1]), () => {}));
       } else if (e.event === "image" && typeof e.data?.url === "string") {
         loading.push(preload(e.data.url).then(() => void (ctl.signal.aborted || dispatch({ type: "event", e }))));
       } else {
@@ -291,7 +292,7 @@ export function App() {
       await Promise.all(loading);
     } catch (err) {
       failed = true;
-      if (!ctl.signal.aborted) dispatch({ type: "event", e: { event: "error", data: { message: "连接断了，请再试一次。" } } });
+      if (!ctl.signal.aborted) dispatch({ type: "event", e: { event: "error", data: { message: T.dropped } } });
     }
     if (ctl.signal.aborted) return;
     dispatch({ type: "finish", input, failed });
@@ -316,7 +317,7 @@ export function App() {
       window.scrollTo({ top: 0 });
       setPanel("");
     } catch (e: any) {
-      toast(String(e?.message ?? "打不开这段记录"));
+      toast(String(e?.message ?? T.cantOpen));
     }
   }
 
@@ -334,18 +335,18 @@ export function App() {
 
       <nav className="top">
         <span className="top-left">
-          <button type="button" className="brand" onClick={() => show(-1)} title="回到封面">
+          <button type="button" className="brand" onClick={() => show(-1)} title={T.toCover}>
             Folio
           </button>
           {s.at >= 0 && s.pages.length > 1 && (
             <span className="pager">
-              <button type="button" onClick={() => show(s.busy ? s.at : s.at - 1)} disabled={s.at === 0 && !s.busy} aria-label="上一页" title="上一页">
+              <button type="button" onClick={() => show(s.busy ? s.at : s.at - 1)} disabled={s.at === 0 && !s.busy} aria-label={T.prev} title={T.prev}>
                 ←
               </button>
               <span className="pager-n">
                 {s.at + 1} / {s.pages.length}
               </span>
-              <button type="button" onClick={() => show(s.at + 1)} disabled={s.busy || s.at >= s.pages.length - 1} aria-label="下一页" title="下一页">
+              <button type="button" onClick={() => show(s.at + 1)} disabled={s.busy || s.at >= s.pages.length - 1} aria-label={T.next} title={T.next}>
                 →
               </button>
             </span>
@@ -353,18 +354,21 @@ export function App() {
         </span>
         <span className="top-right">
           {SHOW_TIMING && (s.timing.first || s.busy) && (
-            <button type="button" className="timing" onClick={() => setShowTiming((v) => !v)} title="各阶段耗时，点击收起或展开">
-              {showTiming ? <TimingLine t={s.timing} busy={s.busy} /> : "耗时"}
+            <button type="button" className="timing" onClick={() => setShowTiming((v) => !v)} title={T.timingTitle}>
+              {showTiming ? <TimingLine t={s.timing} busy={s.busy} /> : T.timing}
             </button>
           )}
-          {MOCK && <span className="mock-flag">假数据</span>}
+          {MOCK && <span className="mock-flag">{T.mock}</span>}
           {!MOCK && (
             <button type="button" className="nav-link" onClick={() => setPanel("history")}>
-              历史
+              {T.history}
             </button>
           )}
           <button type="button" className="nav-link" onClick={() => setPanel("memory")}>
-            记忆
+            {T.memory}
+          </button>
+          <button type="button" className="nav-link" onClick={switchLang} lang={T.locale === "en-US" ? "zh-CN" : "en"}>
+            {T.otherLang}
           </button>
         </span>
       </nav>
@@ -391,14 +395,14 @@ export function App() {
               <div className="cover-left">
                 <header>
                   <h1 className="masthead">Folio</h1>
-                  <p className="cover-note">问什么，都给你排一页。</p>
+                  <p className="cover-note">{T.tagline}</p>
                 </header>
                 <ul className="cover-lines ">
                   {recent && (
                     <li className="resume">
                       <button type="button" onClick={resume}>
-                        <span className="n">接着看</span>
-                        {recent.title || "上次那一页"}
+                        <span className="n">{T.resume}</span>
+                        {recent.title || T.resumeUntitled}
                       </button>
                     </li>
                   )}
@@ -415,9 +419,9 @@ export function App() {
               <div className="cover-right">
                 {problems.length > 0 && (
                   <div className="setup" role="alert">
-                    <h2>还差一步才能用</h2>
+                    <h2>{T.setupTitle}</h2>
                     <ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul>
-                    <p>改好后重启服务，再刷新这个页面。</p>
+                    <p>{T.setupNote}</p>
                   </div>
                 )}
                 <ul className="cover-lines ">
@@ -450,11 +454,11 @@ export function App() {
           }}
         >
           {attach ? (
-            <button type="button" className="attach has-image" onClick={() => setAttach("")} aria-label="去掉这张图片" title="去掉这张图片">
+            <button type="button" className="attach has-image" onClick={() => setAttach("")} aria-label={T.removePic} title={T.removePic}>
               <img src={attach} alt="" />
             </button>
           ) : (
-            <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label="附一张图片" title="附一张图片，问问这是什么">
+            <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label={T.addPic} title={T.addPicTitle}>
               {s.busy ? <span className="orb" aria-hidden /> : "＋"}
             </button>
           )}
@@ -472,11 +476,11 @@ export function App() {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={s.busy ? (s.asking ? "正在排这一页…" : "正在出图…") : attach ? "想问这张图什么？不写就直接讲" : s.head ? "接着问，比如“举个例子”" : "问点什么，或者附一张图"}
+            placeholder={s.busy ? (s.asking ? T.phMaking : T.phPictures) : attach ? T.phWithPic : s.head ? T.phFollow : T.phFirst}
             maxLength={400}
-            aria-label="输入你的问题"
+            aria-label={T.inputLabel}
           />
-          <button type="submit" className="send" disabled={(!draft.trim() && !attach) || s.busy} aria-label="发送">
+          <button type="submit" className="send" disabled={(!draft.trim() && !attach) || s.busy} aria-label={T.send}>
             ↑
           </button>
         </form>
@@ -506,8 +510,8 @@ export function App() {
 }
 
 function TimingLine({ t, busy }: { t: Timing; busy: boolean }) {
-  const f = (ms?: number) => (ms == null ? "…" : (ms / 1000).toFixed(1) + " 秒");
-  const parts = [`首块 ${f(t.first)}`, `版面 ${f(t.scene)}`];
-  if (t.image != null || (busy && t.scene != null)) parts.push(`图片 ${f(t.image)}`);
+  const f = (ms?: number) => (ms == null ? "…" : T.seconds((ms / 1000).toFixed(1)));
+  const parts = [`${T.tFirst} ${f(t.first)}`, `${T.tLayout} ${f(t.scene)}`];
+  if (t.image != null || (busy && t.scene != null)) parts.push(`${T.tPictures} ${f(t.image)}`);
   return <>{parts.join(" · ")}</>;
 }

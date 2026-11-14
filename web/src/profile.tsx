@@ -1,6 +1,7 @@
 // What the app remembers about the user, and small helpers around it.
 import { useState } from "react";
 import { motion } from "motion/react";
+import { LANG, T } from "./i18n";
 
 export type Pref = { id: string; text: string; added: string };
 export type Profile = { prefs: Pref[] };
@@ -10,9 +11,11 @@ export const EMPTY: Profile = { prefs: [] };
 export type ThreadMeta = { id: string; title: string; updated: string; count: number; bg?: string; img?: string };
 
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const res = await fetch(path, body === undefined ? { method } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const headers: Record<string, string> = { "X-Folio-Lang": LANG };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "出错了，请再试一次。");
+  if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : T.failed);
   return data as T;
 }
 
@@ -51,24 +54,24 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
 
   return (
     <motion.div className="sheet-scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.aside className="panel" role="dialog" aria-modal aria-label="记忆" initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} onClick={(e) => e.stopPropagation()}>
+      <motion.aside className="panel" role="dialog" aria-modal aria-label={T.memory} initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>记忆</h2>
-          <button type="button" onClick={onClose} aria-label="关闭">
-            关闭
+          <h2>{T.memory}</h2>
+          <button type="button" onClick={onClose}>
+            {T.close}
           </button>
         </header>
 
         <section>
           {profile.prefs.length === 0 ? (
-            <p className="panel-note">还没有。你提到的背景和偏好会记在这里，比如“我是初中生”“多用比喻讲”，之后的讲解会照着来。</p>
+            <p className="panel-note">{T.memoryEmpty}</p>
           ) : (
             <ul className="prefs">
               {profile.prefs.map((p) => (
                 <li key={p.id}>
                   <span>{p.text}</span>
-                  <button type="button" onClick={() => run(api.deletePref(p.id))} aria-label={`忘掉：${p.text}`}>
-                    忘掉
+                  <button type="button" onClick={() => run(api.deletePref(p.id))} aria-label={T.forgetThis(p.text)}>
+                    {T.forget}
                   </button>
                 </li>
               ))}
@@ -79,7 +82,7 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
         {error && <p className="panel-error" role="alert">{error}</p>}
 
         <footer>
-          <p className="panel-note">这些只存在运行这个应用的电脑上，每次提问时会一起发给模型。</p>
+          <p className="panel-note">{T.memoryNote}</p>
           {profile.prefs.length > 0 && (
             <button
               type="button"
@@ -90,7 +93,7 @@ export function ProfilePanel({ profile, onChange, onClose }: PanelProps) {
                 run(api.clear());
               }}
             >
-              {armed ? "再点一次，全部忘掉" : "全部忘掉"}
+              {armed ? T.forgetAllArmed : T.forgetAll}
             </button>
           )}
         </footer>
@@ -115,7 +118,7 @@ export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
                 onDismiss(t.id);
               }}
             >
-              撤销
+              {T.undo}
             </button>
           )}
         </motion.div>

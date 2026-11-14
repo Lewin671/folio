@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { Head, Img, Op } from "./types";
 import { inkOn, midStop, validHex } from "./theme";
+import { T } from "./i18n";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 const enter = { initial: { opacity: 0, y: 22 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, transition: { duration: 0.2 } } };
@@ -106,7 +107,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
                 </div>
                 <div className="tile-text">
                   <p className="option-tag">
-                    {b.pick && <span className="pick">推荐</span>}
+                    {b.pick && <span className="pick">{T.pick}</span>}
                     {str(b.tag)}
                   </p>
                   <h2>{str(b.title)}</h2>
@@ -138,7 +139,7 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
             );
           })}
         </AnimatePresence>
-        {done && <p className="fineprint">由模型生成，可能有误，重要信息请核实。</p>}
+        {done && <p className="fineprint">{T.fineprint}</p>}
       </div>
     </main>
   );
@@ -146,7 +147,9 @@ export function Scene({ head, stage, images, stale, busy, onSay }: Props) {
 
 /** Long titles get a smaller size so the display type never breaks the page. */
 function titleLen(title: unknown) {
-  const n = [...str(title)].length;
+  // Latin letters are about half as wide as Chinese characters.
+  let n = 0;
+  for (const ch of str(title)) n += ch.charCodeAt(0) > 0x2e7f ? 1 : 0.55;
   return n <= 6 ? "s" : n <= 10 ? "m" : n <= 16 ? "l" : "xl";
 }
 
@@ -162,8 +165,8 @@ function Figure({ img }: { img?: Img }) {
         </AnimatePresence>
       </div>
       {!url && !img?.failed && <div className="figure-ghost" aria-hidden />}
-      {img?.pending && <figcaption>{url ? "正在改图" : "正在出图"}</figcaption>}
-      {img?.failed && <figcaption>{url ? "没改成，保留原图" : "图没出来"}</figcaption>}
+      {img?.pending && <figcaption>{url ? T.picEditing : T.picMaking}</figcaption>}
+      {img?.failed && <figcaption>{url ? T.picEditFailed : T.picFailed}</figcaption>}
     </figure>
   );
 }
@@ -219,13 +222,13 @@ const Parts = ({ op, onSay, busy }: BlockProps) => (
   <ul className="parts">
     {list(op.items).slice(0, 6).map((it, i) => (
       <li key={str(it.id) || i}>
-        <button type="button" disabled={busy} onClick={() => onSay(`展开讲讲「${str(it.name)}」`)}>
+        <button type="button" disabled={busy} onClick={() => onSay(T.more(str(it.name)))}>
           {validHex(it.hex) && <span className="dot" style={{ background: it.hex }} />}
           <span className="part-text">
             <span className="part-name">{str(it.name)}</span>
             {str(it.note) && <span className="part-note">{str(it.note)}</span>}
           </span>
-          <span className="part-more">展开</span>
+          <span className="part-more">{T.moreLabel}</span>
         </button>
       </li>
     ))}
@@ -297,13 +300,13 @@ const renderers: Record<string, (p: BlockProps) => React.ReactNode> = {
     <div className="rules">
       {list(op.do).length > 0 && (
         <div className="rule-card">
-          <h3>{str(op.doLabel) || "是这样"}</h3>
+          <h3>{str(op.doLabel) || T.doLabel}</h3>
           <ul>{list(op.do).slice(0, 4).map((x, i) => <li key={i}>{str(x)}</li>)}</ul>
         </div>
       )}
       {list(op.dont).length > 0 && (
         <div className="rule-card is-dont">
-          <h3>{str(op.dontLabel) || "不是这样"}</h3>
+          <h3>{str(op.dontLabel) || T.dontLabel}</h3>
           <ul>{list(op.dont).slice(0, 4).map((x, i) => <li key={i}>{str(x)}</li>)}</ul>
         </div>
       )}
@@ -350,7 +353,7 @@ function Cards({ items }: { items: any[] }) {
   return (
     <div className="cards">
       {items.map((it, i) => (
-        <button type="button" key={i} className={`card ${turned.has(i) ? "is-turned" : ""}`} onClick={() => flip(i)} aria-label={turned.has(i) ? "翻回正面" : "翻面看答案"}>
+        <button type="button" key={i} className={`card ${turned.has(i) ? "is-turned" : ""}`} onClick={() => flip(i)} aria-label={turned.has(i) ? T.flipBack : T.flip}>
           <span className="card-inner">
             <span className="card-face card-front">
               <small>{String(i + 1).padStart(2, "0")}</small>
@@ -382,7 +385,7 @@ function Quiz({ op }: { op: Op }) {
       </div>
       {picked !== null && (
         <motion.p className="quiz-why" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          {picked === answer ? "答对了。" : "不对。"}
+          {picked === answer ? T.right : T.wrong}
           {str(op.why)}
         </motion.p>
       )}
@@ -402,7 +405,7 @@ function Checklist({ groups }: { groups: any[] }) {
   return (
     <div className="checklist">
       <p className="checklist-count">
-        <b>{done.size}</b> / {total} 已完成
+        <b>{done.size}</b> / {total} {T.done}
       </p>
       <div className="checklist-groups">
         {groups.map((g, gi) => (
