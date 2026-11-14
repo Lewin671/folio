@@ -3,13 +3,7 @@ import { useEffect, useState } from "react";
 import { m } from "motion/react";
 import { api, type ThreadMeta } from "./profile";
 import { T } from "./i18n";
-
-const day = (iso: string) => {
-  const d = new Date(iso);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  return sameDay ? d.toLocaleTimeString(T.locale, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(T.locale, { month: "long", day: "numeric" });
-};
+import { ThreadRow } from "./thread-row";
 
 type Props = { onDelete: typeof api.deleteThread; current: string; onOpen: (id: string) => void; onDeleted: (id: string) => void; onClose: () => void };
 
@@ -42,17 +36,7 @@ export function HistoryPanel({ current, onOpen, onDeleted, onClose, onDelete }: 
             <ul className="threads">
               {threads.map((t) => (
                 <li key={t.id} className={t.id === current ? "is-current" : ""}>
-                  <button type="button" className="thread" onClick={() => onOpen(t.id)}>
-                    <span className="thread-pic" style={{ background: t.bg }}>
-                      {t.img && <img src={t.img} alt="" loading="lazy" />}
-                    </span>
-                    <span className="thread-text">
-                      <strong>{t.title || T.untitled}</strong>
-                      <small>
-                        {day(t.updated)} · {T.pages(t.count)}{t.id === current ? " · " + T.openNow : ""}
-                      </small>
-                    </span>
-                  </button>
+                  <ThreadRow thread={t} current={t.id === current} onOpen={() => onOpen(t.id)} />
                   <button
                     type="button"
                     className="thread-del"

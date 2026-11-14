@@ -5,21 +5,36 @@ import { hasImageFile, imageFile } from "./composer-files";
 
 const SEND_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ ↵" : "Ctrl ↵";
 const CONTENT_SIZING = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+const HOVER = typeof matchMedia !== "function" || matchMedia("(hover: hover)").matches;
 
-export type ComposerHandle = { submit: (text: string) => void };
+export type ComposerHandle = { submit: (text: string) => void; focus: () => void };
 type Props = {
   ref: Ref<ComposerHandle>;
   busy: boolean;
   asking: boolean;
   hasHead: boolean;
+  /** On the cover the question is set as a headline in the page; elsewhere the input is a bar at the foot. */
+  cover: boolean;
   error: string;
   onSend: (text: string, image?: string) => boolean;
+  /** Stops the page being made and returns its question. */
+  onStop: () => string;
   onToast: (text: string) => void;
 };
 
-export const Composer = memo(function Composer({ ref, busy, asking, hasHead, error, onSend, onToast }: Props) {
+const icon = { width: 18, height: 18, viewBox: "0 0 18 18", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
+
+/** A headline that runs long is set smaller, so the cover keeps its shape. Latin letters count as half. */
+function lengthOf(text: string) {
+  let n = 0;
+  for (const ch of text) n += ch.charCodeAt(0) > 0x2e7f ? 1 : 0.5;
+  return n <= 12 ? "s" : n <= 26 ? "m" : "l";
+}
+
+export const Composer = memo(function Composer({ ref, busy, asking, hasHead, cover, error, onSend, onStop, onToast }: Props) {
   const [draft, setDraft] = useState("");
   const [attach, setAttach] = useState("");
+  const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const resize = useRef<() => void>(() => {});
@@ -38,9 +53,10 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, err
       // Most input fits on one line. Check its width without a DOM layout;
       // measure scrollHeight only for wrapped/multiline text or when shrinking.
       if (!el.style.height && !el.value.includes("\n") && context && context.measureText(el.value).width < width) return;
+      const style = getComputedStyle(el);
       el.style.height = "auto";
-      const height = Math.min(el.scrollHeight, 120);
-      el.style.height = height <= 24 ? "" : height + "px";
+      const height = Math.min(el.scrollHeight, parseFloat(style.maxHeight) || 120);
+      el.style.height = height <= parseFloat(style.lineHeight) + 1 ? "" : height + "px";
     };
     const observer = new ResizeObserver(([entry]) => {
       if (width === entry.contentRect.width) return;
@@ -54,7 +70,12 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, err
 
   useEffect(() => {
     if (!CONTENT_SIZING) resize.current();
-  }, [draft]);
+  }, [draft, cover]);
+
+  // The cover is for asking: with a keyboard at hand the question can be typed straight away.
+  useEffect(() => {
+    if (cover && HOVER) box.current?.focus({ preventScroll: true });
+  }, [cover]);
 
   function submit(text: string) {
     if (onSend(text, attach || undefined)) {
@@ -62,10 +83,10 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, err
       setAttach("");
       picking.current++; // a photo still decoding must not reappear after sending
       // Keep desktop keyboard flow after clicking ↑ without reopening soft keyboards on touch devices.
-      if (typeof matchMedia !== "function" || matchMedia("(hover: hover)").matches) box.current?.focus();
+      if (HOVER) box.current?.focus();
     }
   }
-  useImperativeHandle(ref, () => ({ submit }));
+  useImperativeHandle(ref, () => ({ submit, focus: () => box.current?.focus() }));
 
   async function pickFile(file: File) {
     const version = ++picking.current;
@@ -76,28 +97,66 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, err
       if (version === picking.current) onToast(T.badPic);
     }
   }
+  const pick = useRef(pickFile);
+  pick.current = pickFile;
 
+  // A picture pasted or dropped anywhere on the page is attached, wherever the focus happens to be.
+  useEffect(() => {
+    const editable = (t: EventTarget | null) => t instanceof HTMLElement && !!t.closest("textarea, input, [contenteditable]");
+    const onPaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      const file = imageFile(e.clipboardData);
+      if (file) {
+        e.preventDefault();
+        return void pick.current(file);
+      }
+      const text = editable(e.target) ? "" : e.clipboardData.getData("text/plain");
+      if (!text) return;
+      e.preventDefault();
+      setDraft((d) => (d + text).slice(0, 400));
+      box.current?.focus();
+    };
+    let leave = 0;
+    const onDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer || !hasImageFile(e.dataTransfer)) return;
+      e.preventDefault();
+      setDropping(true);
+      // dragleave fires between every element crossed; a pause in dragover means the picture left.
+      clearTimeout(leave);
+      leave = window.setTimeout(() => setDropping(false), 150);
+    };
+    const onDrop = (e: DragEvent) => {
+      const file = e.dataTransfer && imageFile(e.dataTransfer);
+      if (!file) return;
+      e.preventDefault();
+      setDropping(false);
+      void pick.current(file);
+    };
+    document.addEventListener("paste", onPaste);
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      clearTimeout(leave);
+      document.removeEventListener("paste", onPaste);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
+  const empty = !draft.trim() && !attach;
   return (
     <div className="dock">
-      {error && <p className="error" role="alert">{error}</p>}
-      <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(draft); }}
-        onClick={(e) => { if (e.target === e.currentTarget) box.current?.focus(); }}
-        onPaste={(e) => {
-          const file = imageFile(e.clipboardData);
-          if (file) { e.preventDefault(); void pickFile(file); }
-        }}
-        onDragOver={(e) => { if (hasImageFile(e.dataTransfer)) e.preventDefault(); }}
-        onDrop={(e) => {
-          const file = imageFile(e.dataTransfer);
-          if (file) { e.preventDefault(); void pickFile(file); }
-        }}>
+      <form className={`composer len-${lengthOf(draft)} ${dropping ? "is-dropping" : ""}`} onSubmit={(e) => { e.preventDefault(); submit(draft); }}
+        onClick={(e) => { if (e.target === e.currentTarget) box.current?.focus(); }}>
         {attach ? (
           <button type="button" className="attach has-image" onClick={() => { picking.current++; setAttach(""); }} aria-label={T.removePic} title={T.removePic}>
             <img src={attach} alt="" />
+            <span className="attach-label">{T.removePic}</span>
           </button>
         ) : (
           <button type="button" className="attach" onClick={() => picker.current?.click()} aria-label={T.addPic} title={T.addPicTitle}>
-            {busy ? <span className="orb" aria-hidden /> : "＋"}
+            <svg {...icon}><path d="M9 3.5v11M3.5 9h11" /></svg>
+            <span className="attach-label">{T.addPic}</span>
           </button>
         )}
         <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => {
@@ -109,13 +168,22 @@ export const Composer = memo(function Composer({ ref, busy, asking, hasHead, err
         <textarea ref={box} rows={1} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            submit(draft);
+            if (!busy) submit(draft);
           }
         }} placeholder={busy ? (asking ? T.phMaking : T.phPictures) : attach ? T.phWithPic : hasHead ? T.phFollow : T.phFirst}
           maxLength={400} aria-label={T.inputLabel} enterKeyHint="enter" />
-        {draft.trim() && !busy && <kbd className="send-key" aria-hidden>{SEND_KEY}</kbd>}
-        <button type="submit" className="send" disabled={(!draft.trim() && !attach) || busy} aria-label={T.send} title={`${T.send} (${SEND_KEY})`}>↑</button>
+        {!empty && !busy && <kbd className="send-key" aria-hidden>{SEND_KEY}<span> {T.sendHint}</span></kbd>}
+        {busy ? (
+          <button type="button" className="send is-stop" onClick={() => { const asked = onStop(); if (asked && !draft) setDraft(asked); }} aria-label={T.stop} title={T.stop}>
+            <svg {...icon}><rect x="5" y="5" width="8" height="8" rx="1" fill="currentColor" stroke="none" /></svg>
+          </button>
+        ) : (
+          <button type="submit" className="send" disabled={empty} aria-label={T.send} title={`${T.send} (${SEND_KEY})`}>
+            <svg {...icon}><path d="M9 14.5v-11M4.5 8 9 3.5 13.5 8" /></svg>
+          </button>
+        )}
       </form>
+      {error && <p className="error" role="alert">{error}</p>}
     </div>
   );
 });

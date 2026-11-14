@@ -55,6 +55,19 @@ const compare: Fixture = {
   ],
 };
 
+// Two options the model gave no pictures: they are set in type alone.
+const words: Fixture = {
+  match: /区别|词|words/,
+  ops: [
+    { t: "scene", id: "s", layout: "compare", tone: "soft", bg: "#D9C8E8", accent: "#5B3A8A", kicker: "词义辨析", title: "专家靠职业，行家靠本事", lede: "professional 说的是以此为业；expert 说的是懂得多、有专长。" },
+    { t: "option", id: "o1", title: "professional", tag: "职业身份与水准", bg: "#F2E6C9", points: ["强调以此为职业、按行规办事", "可作名词：一位专业人士", "也可作形容词：专业的、得体的"] },
+    { t: "option", id: "o2", title: "expert", tag: "某领域的专长", bg: "#BFD8E8", points: ["强调知识技能远超常人", "可作名词：an expert on…", "作形容词：expert advice"] },
+    { t: "cards", id: "cards", items: [{ front: "She is a professional.", back: "她是专业人士：靠这个吃饭，做事合乎行规。" }, { front: "He is an expert on birds.", back: "他是鸟类专家：懂得多。" }, { front: "He's an expert, not a professional.", back: "他很懂行，但不以此为业。这句话里两个词的分工最清楚。" }, { front: "expert advice", back: "内行的建议" }] },
+    { t: "quote", id: "q", body: "professional 回答“这是不是他的行当”，expert 回答“他懂不懂”。" },
+    actions("考考我", "再加一个词", "看回对比"),
+  ],
+};
+
 const layers: Fixture = {
   match: /大气|分层|哪几层|layers/,
   ops: [
@@ -177,7 +190,7 @@ const crowded: Fixture = {
 
 const failing: Fixture = { match: /出错|error/, ops: [] };
 
-const fixtures = [deeper, study, compare, layers, timeline, process, gallery, plan, note, crowded, failing, subject];
+const fixtures = [words, deeper, study, compare, layers, timeline, process, gallery, plan, note, crowded, failing, subject];
 
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {

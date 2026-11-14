@@ -69,6 +69,9 @@ export const Scene = memo(function Scene({ head, stage, images, stale, busy, onS
     return c ? { ["--tile" as any]: c, ["--tile-ink" as any]: inkOn(c) } : undefined;
   };
 
+  // An option the model gave no picture is set in type alone, not shown as a picture that failed.
+  const bare = (b: Op) => !images[b.id]?.url && !images[b.id]?.pending;
+
   return (
     <main className={cls}>
       <AnimatePresence>
@@ -87,7 +90,7 @@ export const Scene = memo(function Scene({ head, stage, images, stale, busy, onS
             {head.kicker}
           </m.p>
         )}
-        <m.h1 className={`title len-${titleLen(head.title)}`} key={head.title} {...enter} transition={{ ...spring, delay: 0.06 }}>
+        <m.h1 className="title" style={{ ["--per" as any]: titlePer(head.title) }} key={head.title} {...enter} transition={{ ...spring, delay: 0.06 }}>
           {head.title}
         </m.h1>
         {str(head.lede) && (
@@ -101,10 +104,12 @@ export const Scene = memo(function Scene({ head, stage, images, stale, busy, onS
         <div className="gallery">
           <AnimatePresence mode="popLayout">
             {options.map((b, i) => (
-              <m.article key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile option ${b.pick ? "is-pick" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
-                <div className="tile-figure">
-                  <Figure img={images[b.id]} />
-                </div>
+              <m.article key={b.id} layoutId={b.id} layout="position" style={tileStyle(b)} className={`tile option ${b.pick ? "is-pick" : ""} ${bare(b) ? "is-bare" : ""} ${stale.has(b.id) ? "is-stale" : ""}`} {...enter} transition={{ ...spring, delay: 0.08 * i }}>
+                {!bare(b) && (
+                  <div className="tile-figure">
+                    <Figure img={images[b.id]} />
+                  </div>
+                )}
                 <div className="tile-text">
                   <p className="option-tag">
                     {b.pick && <span className="pick">{T.pick}</span>}
@@ -153,12 +158,16 @@ export const Scene = memo(function Scene({ head, stage, images, stale, busy, onS
   );
 });
 
-/** Long titles get a smaller size so the display type never breaks the page. */
-function titleLen(title: unknown) {
+/**
+ * How many characters a line of the title should hold: a short title stays on
+ * one line, longer ones are split over two or three lines of even length.
+ */
+function titlePer(title: unknown) {
   // Latin letters are about half as wide as Chinese characters.
   let n = 0;
   for (const ch of str(title)) n += ch.charCodeAt(0) > 0x2e7f ? 1 : 0.55;
-  return n <= 6 ? "s" : n <= 10 ? "m" : n <= 16 ? "l" : "xl";
+  const lines = n <= 9 ? 1 : n <= 20 ? 2 : 3;
+  return Math.max(4, Math.ceil(n / lines) + (lines > 1 ? 1 : 0));
 }
 
 function Figure({ img }: { img?: Img }) {

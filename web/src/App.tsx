@@ -4,8 +4,8 @@ import type { Head, Img, Op, StreamEvent, Timing, Turn } from "./types";
 import { forHistory, MOCK, runTurn } from "./stream";
 import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
 import { Scene, stageOf } from "./scene";
-import { COVERS } from "./covers";
 import { api, EMPTY, Toasts, type Profile, type ThreadMeta, type Toast } from "./profile";
+import { ThreadRow } from "./thread-row";
 import { Composer, type ComposerHandle } from "./composer";
 import { createThreadSaver } from "./thread-saver";
 import { parseRoute, routeURL, type Route } from "./route";
@@ -16,6 +16,17 @@ const HistoryPanel = lazy(() => import("./history").then((m) => ({ default: m.Hi
 
 // Shown on the cover as headlines; each leads to a different kind of page.
 const SUGGESTIONS = T.suggestions;
+
+// The cover is plain type on one flat colour, a different one each day.
+const PAPERS = ["#E0452B", "#1D3C8F", "#EFB52C", "#14513E", "#E9E2D0", "#5C1E3B", "#D8D3F0"];
+const paperOfTheDay = () => PAPERS[Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 86400000) % PAPERS.length];
+// With sample data there is no server to ask, so the cover lists a few made-up conversations (not with ?fresh).
+const MOCK_RECENTS: ThreadMeta[] = !MOCK || new URLSearchParams(location.search).has("fresh") ? [] : [
+  { id: "m1", title: T.suggestions[0], updated: new Date(Date.now() - 3600e3).toISOString(), count: 3, bg: "#0E2A5C", img: "/pics/jelly.jpg" },
+  { id: "m2", title: T.suggestions[1], updated: new Date(Date.now() - 86400e3).toISOString(), count: 1, bg: "#E69F2C", img: "/pics/moka.jpg" },
+  { id: "m3", title: T.suggestions[2], updated: new Date(Date.now() - 4 * 86400e3).toISOString(), count: 5, bg: "#27306B" },
+];
+const RECENT = 3; // how many earlier conversations the cover lists
 
 type State = {
   head: Head | null;
@@ -171,12 +182,11 @@ const preload = (url: string) =>
 export function App() {
   const [s, dispatch] = useReducer(reducer, initial);
   const [showTiming, setShowTiming] = useState(false);
-  // The home screen is a magazine cover: one of the shipped pictures on its own backdrop.
-  const [cover] = useState(() => COVERS[Math.floor(Math.random() * COVERS.length)]);
+  const [paper] = useState(paperOfTheDay);
   const [profile, setProfile] = useState<Profile>(EMPTY);
   const [problems, setProblems] = useState<string[]>([]); // what is missing in the setup, if anything
   const [panel, setPanel] = useState<"" | "memory" | "history">("");
-  const [recent, setRecent] = useState<ThreadMeta | null>(null); // the latest conversation, offered on the cover
+  const [recents, setRecents] = useState<ThreadMeta[]>([]); // the latest conversations, listed on the cover
   const [toasts, setToasts] = useState<Toast[]>([]);
   const composer = useRef<ComposerHandle>(null);
   const say = useCallback((text: string) => composer.current?.submit(text), []);
@@ -192,8 +202,8 @@ export function App() {
 
   // The field is the scene colour until the main picture arrives; then it
   // becomes that picture's own backdrop, so the figure stands on the page.
-  const heroStops = !s.head ? cover.stops : stage?.hero && !stage.framed ? s.images[stage.hero.id]?.stops : undefined;
-  const flat = midStop(heroStops) ?? (s.head && validHex(s.head.bg) ? s.head.bg.trim() : "#8c857b");
+  const heroStops = stage?.hero && !stage.framed ? s.images[stage.hero.id]?.stops : undefined;
+  const flat = midStop(heroStops) ?? (!s.head ? paper : validHex(s.head.bg) ? s.head.bg.trim() : "#8c857b");
   const field = heroStops?.length ? backdropGradient(heroStops, "var(--hero-top)", "var(--hero-h)") : flat;
   const theme = useMemo(() => stageTheme(flat, s.head?.accent), [flat, s.head?.accent]);
   useEffect(() => {
@@ -283,7 +293,8 @@ export function App() {
       const title = first.head.title || clip(first.history[first.history.length - 1]?.user ?? "", 40);
       const img = Object.values(first.images).find((im) => im.url?.startsWith("/api/img/"))?.url;
       await api.saveThread(id, { title, bg: first.head.bg, img }, pages);
-      setRecent({ id, title, updated: new Date().toISOString(), count: pages.length });
+      const meta = { id, title, updated: new Date().toISOString(), count: pages.length, bg: first.head.bg, img };
+      setRecents((rs) => [meta, ...rs.filter((r) => r.id !== id)].slice(0, RECENT));
     },
     api.deleteThread,
     () => toast(T.notSaved),
@@ -371,8 +382,31 @@ export function App() {
     return true;
   }, [toast]);
 
-  const latest = () => api.threads(1).then((r) => setRecent(r.threads[0] ?? null), () => {});
-  const resume = () => (recent && recent.id === s.thread && s.pages.length ? show(s.pages.length - 1) : recent && openThread(recent.id));
+  const latest = () => api.threads(RECENT).then((r) => setRecents(r.threads), () => {});
+  const reopen = (id: string) => (id === s.thread && s.pages.length ? show(s.pages.length - 1) : void openThread(id));
+  /** Stops the page being made and hands the question back so it can be reworded. */
+  const stop = useCallback(() => {
+    const asked = state.current.busy ? state.current.question : "";
+    if (asked) history.back(); // the entry added for this page is stepped off, which cancels it
+    return asked;
+  }, []);
+
+  // Keys for a reader whose hands are off the input: leaf through pages, close a panel, start typing.
+  const keys = useRef((_: KeyboardEvent) => {});
+  keys.current = (e) => {
+    if (e.key === "Escape" && panel) return setPanel("");
+    const el = e.target as HTMLElement | null;
+    if (panel || e.metaKey || e.ctrlKey || e.altKey || el?.closest("textarea, input, [contenteditable]")) return;
+    if (e.key === "/") return void (e.preventDefault(), composer.current?.focus());
+    if (s.at < 0 || s.busy) return;
+    if (e.key === "ArrowLeft" && s.at > 0) show(s.at - 1);
+    if (e.key === "ArrowRight" && s.at < s.pages.length - 1) show(s.at + 1);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   async function openThread(id: string) {
     const visit = ++navigation.current;
@@ -393,16 +427,18 @@ export function App() {
   }
 
   const waitingFirst = s.busy && !!s.asking;
-  const heroClass = !s.head ? "hero-figure" : stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
+  const home = !s.head && !s.busy;
+  const shown = MOCK ? MOCK_RECENTS : recents;
+  const heroClass = stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
 
   return (
-    <div className={`app ${s.busy ? "is-busy" : ""} ${waitingFirst ? "is-thinking" : ""} ${s.head ? "" : "is-home"} ${theme.dark ? "on-dark" : "on-light"} ${heroClass} ${stage ? "tpl-" + stage.tpl : ""}`}>
+    <div className={`app ${s.busy ? "is-busy" : ""} ${waitingFirst ? "is-thinking" : ""} ${home ? "is-home" : ""} ${theme.dark ? "on-dark" : "on-light"} ${heroClass} ${stage ? "tpl-" + stage.tpl : ""}`}>
       <div className="field" aria-hidden>
         <AnimatePresence>
           <m.div key={field} className="field-layer" style={{ background: field }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0.999 }} transition={{ duration: 1.1, ease: "easeInOut" }} />
         </AnimatePresence>
       </div>
-      <div className="glow" aria-hidden />
+      <div className="progress" aria-hidden />
 
       <nav className="top">
         <span className="top-left">
@@ -430,6 +466,11 @@ export function App() {
             </button>
           )}
           {MOCK && <span className="mock-flag">{T.mock}</span>}
+          {!home && (
+            <button type="button" className="nav-link" onClick={() => show(-1)}>
+              {T.newPage}
+            </button>
+          )}
           {!MOCK && (
             <button type="button" className="nav-link" onClick={() => setPanel("history")}>
               {T.history}
@@ -438,9 +479,11 @@ export function App() {
           <button type="button" className="nav-link" onClick={() => setPanel("memory")}>
             {T.memory}
           </button>
-          <button type="button" className="nav-link" onClick={switchLang} lang={T.locale === "en-US" ? "zh-CN" : "en"}>
-            {T.otherLang}
-          </button>
+          {home && (
+            <button type="button" className="nav-link" onClick={switchLang} lang={T.locale === "en-US" ? "zh-CN" : "en"}>
+              {T.otherLang}
+            </button>
+          )}
         </span>
       </nav>
 
@@ -455,63 +498,58 @@ export function App() {
               <Scene head={s.head} stage={stage} images={s.images} stale={s.stale} busy={s.busy} onSay={say} />
             </m.div>
           ) : (
-            <m.div key="home" className="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.8 }}>
-              <div className="hero">
-                <figure className="figure">
-                  <div className="figure-imgs">
-                    <img src={cover.url} alt="" draggable={false} fetchPriority="high" decoding="async" />
-                  </div>
-                </figure>
-              </div>
-              <div className="cover-left">
-                <header>
-                  <h1 className="masthead">Folio</h1>
-                  <p className="cover-note">{T.tagline}</p>
-                </header>
-                <ul className="cover-lines ">
-                  {recent && (
-                    <li className="resume">
-                      <button type="button" onClick={resume}>
-                        <span className="n">{T.resume}</span>
-                        {recent.title || T.resumeUntitled}
-                      </button>
-                    </li>
-                  )}
-                  {SUGGESTIONS.slice(0, 3).map((q, i) => (
-                    <li key={q}>
-                      <button type="button" onClick={() => say(q)}>
-                        <span className="n">{String(i + 1 + 0).padStart(2, "0")}</span>
-                        {q}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="cover-right">
-                {problems.length > 0 && (
-                  <div className="setup" role="alert">
-                    <h2>{T.setupTitle}</h2>
-                    <ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul>
-                    <p>{T.setupNote}</p>
-                  </div>
+            <m.div key="home" className={`home ${shown.length ? "has-recent" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.6 }}>
+              <header>
+                <h1 className="masthead">Folio</h1>
+                <p className="cover-note">{T.tagline}</p>
+              </header>
+              {problems.length > 0 && (
+                <div className="setup" role="alert">
+                  <h2>{T.setupTitle}</h2>
+                  <ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+                  <p>{T.setupNote}</p>
+                </div>
+              )}
+              <div className="cover-lists">
+                <section>
+                  <h2 className="cover-label">{T.tryLabel}</h2>
+                  <ul className="cover-lines">
+                    {SUGGESTIONS.slice(0, shown.length ? 3 : 6).map((q) => (
+                      <li key={q}>
+                        <button type="button" onClick={() => say(q)}>
+                          {q}
+                          <span className="go" aria-hidden>→</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+                {shown.length > 0 && (
+                  <section>
+                    <h2 className="cover-label">
+                      {T.recentLabel}
+                      {!MOCK && (
+                        <button type="button" onClick={() => setPanel("history")}>
+                          {T.allHistory}
+                        </button>
+                      )}
+                    </h2>
+                    <ul className="threads">
+                      {shown.map((t) => (
+                        <li key={t.id}>
+                          <ThreadRow thread={t} onOpen={() => (MOCK ? say(t.title) : reopen(t.id))} />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 )}
-                <ul className="cover-lines ">
-                  {SUGGESTIONS.slice(3, 6).map((q, i) => (
-                    <li key={q}>
-                      <button type="button" onClick={() => say(q)}>
-                        <span className="n">{String(i + 1 + 3).padStart(2, "0")}</span>
-                        {q}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
               </div>
             </m.div>
           )}
         </AnimatePresence>
       </LayoutGroup>
 
-      <Composer ref={composer} busy={s.busy} asking={!!s.asking} hasHead={!!s.head} error={s.error} onSend={sendTurn} onToast={toast} />
+      <Composer ref={composer} busy={s.busy} asking={!!s.asking} hasHead={!!s.head} cover={home} error={s.error} onSend={sendTurn} onStop={stop} onToast={toast} />
 
       <AnimatePresence>
         {panel === "memory" && (
