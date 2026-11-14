@@ -2,7 +2,16 @@
 // without calling any model. They cover each layout plus crowded and failing cases.
 import type { Op, StreamEvent } from "./types";
 
-type Fixture = { match: RegExp; ops: Op[]; images?: Record<string, string | null> };
+type Pic = { url: string; stops: string[] };
+type Fixture = { match: RegExp; ops: Op[]; images?: Record<string, Pic | null> };
+
+// Pictures shot on coloured backdrops, with the edge colours the server would report.
+const pic = {
+  magenta: { url: "/mock/magenta.jpg", stops: ["#b13979", "#be488a", "#c14c8e", "#bf488a", "#bb4286", "#c95797"] },
+  cobalt: { url: "/mock/cobalt.jpg", stops: ["#0d2986", "#193298", "#18349c", "#173098", "#102b8f", "#0f3499"] },
+  olive: { url: "/mock/olive.jpg", stops: ["#666540", "#716e49", "#716d4a", "#6e6a47", "#5c5d35", "#848159"] },
+  flat: { url: "/mock/flat.jpg", stops: ["#9fbfd8", "#a3c1da", "#a1bfd9", "#98b8d1", "#86adc9", "#80a4c1"] },
+};
 
 const actions = (...labels: string[]): Op => ({
   t: "actions",
@@ -12,9 +21,9 @@ const actions = (...labels: string[]): Op => ({
 
 const look: Fixture = {
   match: /面试|一套|look/,
-  images: { hero: "/mock/look.jpg" },
+  images: { hero: pic.cobalt },
   ops: [
-    { t: "scene", id: "s", layout: "look", tone: "editorial", bg: "#F1EEE8", ink: "#1B2233", accent: "#2F4A8A", kicker: "面试 · 休闲", title: "松一点的正式", lede: "西装保留轮廓，其余全部换成软的。" },
+    { t: "scene", id: "s", layout: "look", tone: "editorial", bg: "#1C36A0", accent: "#F2D9A0", kicker: "面试 · 休闲", title: "松一点的正式", lede: "西装保留轮廓，其余全部换成软的。" },
     { t: "image", id: "hero", kind: "figure", prompt: "x", pending: true },
     { t: "pieces", id: "pieces", items: [
       { id: "p1", name: "藏青无垫肩西装", note: "袖口推到小臂", hex: "#1F2A44" },
@@ -29,9 +38,9 @@ const look: Fixture = {
 
 const swap: Fixture = {
   match: /换掉|换成|换一件/,
-  images: { hero: "/mock/look2.jpg" },
+  images: { hero: pic.magenta },
   ops: [
-    { t: "scene", id: "s", layout: "look", tone: "editorial", bg: "#F3ECE2", ink: "#2A2018", accent: "#9A6234", kicker: "面试 · 休闲", title: "换成驼色", lede: "驼色比藏青更暖，适合创意类岗位。" },
+    { t: "scene", id: "s", layout: "look", tone: "editorial", bg: "#BE488A", accent: "#F6E7C8", kicker: "面试 · 休闲", title: "换成驼色", lede: "驼色比藏青更暖，适合创意类岗位。" },
     { t: "image", id: "hero", kind: "figure", edit: true, prompt: "x", pending: true },
     { t: "pieces", id: "pieces", items: [
       { id: "p1", name: "驼色羊毛西装", note: "同样不垫肩", hex: "#B98A5E" },
@@ -46,9 +55,9 @@ const swap: Fixture = {
 
 const compare: Fixture = {
   match: /还是|哪个|compare/,
-  images: { o1: "/mock/alt.jpg", o2: "/mock/look2.jpg" },
+  images: { o1: pic.cobalt, o2: pic.olive },
   ops: [
-    { t: "scene", id: "s", layout: "compare", tone: "modern", bg: "#EEF1F6", ink: "#141A2A", accent: "#2B3A67", kicker: "第一套西装", title: "先买藏青", lede: "藏青的适用场合比黑色多一倍。" },
+    { t: "scene", id: "s", layout: "compare", tone: "modern", bg: "#11131A", accent: "#8FA8FF", kicker: "第一套西装", title: "先买藏青", lede: "藏青的适用场合比黑色多一倍。" },
     { t: "option", id: "o1", title: "藏青西装", tag: "更实用", pick: true, kind: "figure", prompt: "x", pending: true, points: ["面试、开会、婚礼都能穿", "配牛仔裤也不突兀", "白天晚上都成立"] },
     { t: "option", id: "o2", title: "驼色西装", tag: "更有性格", kind: "figure", prompt: "x", pending: true, points: ["偏休闲，正式场合不够", "显气色，但挑下装颜色"] },
     { t: "facts", id: "facts", items: [{ label: "藏青覆盖场合", value: "约 80%" }, { label: "驼色覆盖场合", value: "约 40%" }] },
@@ -60,7 +69,7 @@ const compare: Fixture = {
 const palette: Fixture = {
   match: /配色|颜色|大地色|palette/,
   ops: [
-    { t: "scene", id: "s", layout: "palette", tone: "soft", bg: "#F4EFE7", ink: "#2A2119", accent: "#9A6B43", kicker: "秋日配色", title: "大地色怎么配", lede: "米白打底、驼色主调、深棕收口，再加一点焦糖。" },
+    { t: "scene", id: "s", layout: "palette", tone: "soft", bg: "#2B1D14", accent: "#E0A26B", kicker: "秋日配色", title: "大地色怎么配", lede: "米白打底、驼色主调、深棕收口，再加一点焦糖。" },
     { t: "swatches", id: "sw", items: [
       { hex: "#EFE6D6", name: "米白", role: "打底 60%" },
       { hex: "#C89B6C", name: "驼色", role: "主调 30%" },
@@ -75,9 +84,9 @@ const palette: Fixture = {
 
 const guide: Fixture = {
   match: /怎么选|怎么穿|方法|guide/,
-  images: { hero: "/mock/alt.jpg" },
+  images: { hero: pic.olive },
   ops: [
-    { t: "scene", id: "s", layout: "guide", tone: "editorial", bg: "#F2F0EA", ink: "#1E2420", accent: "#3F6B52", kicker: "风衣 · 版型", title: "风衣怎么选", lede: "先看肩线，再看长度，最后才是颜色。" },
+    { t: "scene", id: "s", layout: "guide", tone: "editorial", bg: "#6E6A47", accent: "#F0E2B6", kicker: "风衣 · 版型", title: "风衣怎么选", lede: "先看肩线，再看长度，最后才是颜色。" },
     { t: "image", id: "hero", kind: "figure", prompt: "x", pending: true },
     { t: "steps", id: "steps", items: [
       { title: "肩线落在肩骨外一指", body: "太合肩显旧，落太多显垮。" },
@@ -91,8 +100,10 @@ const guide: Fixture = {
 
 const pack: Fixture = {
   match: /带什么|行李|清单|pack/,
+  images: { hero: pic.flat },
   ops: [
-    { t: "scene", id: "s", layout: "pack", tone: "modern", bg: "#EDF2F4", ink: "#12202A", accent: "#1F6F8B", kicker: "冰岛 · 七天", title: "三层穿法", lede: "排汗、保暖、防风各一层，其余都是多余的。" },
+    { t: "scene", id: "s", layout: "pack", tone: "modern", bg: "#9CBDD6", accent: "#12324A", kicker: "冰岛 · 七天", title: "三层穿法", lede: "排汗、保暖、防风各一层，其余都是多余的。" },
+    { t: "image", id: "hero", kind: "flatlay", prompt: "x", pending: true },
     { t: "facts", id: "facts", items: [{ label: "气温", value: "-2–5°C" }, { label: "风", value: "常年大" }, { label: "行李", value: "一只登机箱" }] },
     { t: "checklist", id: "list", groups: [
       { title: "贴身层", items: ["美利奴长袖 ×2", "美利奴打底裤 ×1", "羊毛袜 ×4"] },
@@ -106,11 +117,11 @@ const pack: Fixture = {
 
 const mood: Fixture = {
   match: /风格|感觉|灵感|mood/,
-  images: { m1: "/mock/look.jpg", m2: "/mock/alt.jpg", m3: "/mock/look2.jpg" },
+  images: { m1: pic.olive, m2: pic.flat, m3: pic.magenta },
   ops: [
-    { t: "scene", id: "s", layout: "mood", tone: "soft", bg: "#F5F0EC", ink: "#2B2320", accent: "#A8553F", kicker: "风格", title: "松弛感", lede: "不是随便穿，是每一件都大半号。" },
+    { t: "scene", id: "s", layout: "mood", tone: "soft", bg: "#E9DDCB", accent: "#A8553F", kicker: "风格", title: "松弛感", lede: "不是随便穿，是每一件都大半号。" },
     { t: "image", id: "m1", kind: "figure", prompt: "x", pending: true },
-    { t: "image", id: "m2", kind: "figure", prompt: "x", pending: true },
+    { t: "image", id: "m2", kind: "flatlay", prompt: "x", pending: true },
     { t: "image", id: "m3", kind: "figure", prompt: "x", pending: true },
     { t: "rules", id: "rules", do: ["天然面料，允许有褶", "低饱和，同色系叠穿"], dont: ["明显的 logo", "紧身加高跟"] },
     { t: "quote", id: "q", body: "看起来没用力，是最费力的。" },
@@ -121,7 +132,7 @@ const mood: Fixture = {
 const note: Fixture = {
   match: /几点|天气|note/,
   ops: [
-    { t: "scene", id: "s", layout: "note", tone: "editorial", bg: "#F3F1EE", ink: "#1C1C1C", accent: "#5B5B8A", kicker: "不在行", title: "这个我答不好", lede: "我只懂穿搭。" },
+    { t: "scene", id: "s", layout: "note", tone: "editorial", bg: "#3A2F5B", accent: "#E6C7FF", kicker: "不在行", title: "这个我答不好", lede: "我只懂穿搭。" },
     { t: "text", id: "tx", body: "不过可以告诉我你要去哪、做什么，我来帮你决定穿什么。" },
     actions("周五面试穿什么", "秋天怎么配色"),
   ],
@@ -132,7 +143,7 @@ const crowded: Fixture = {
   match: /拥挤|crowded/,
   images: { hero: null },
   ops: [
-    { t: "scene", id: "s", layout: "look", tone: "modern", bg: "#101418", ink: "#EEEEEE", accent: "#F5F0A0", kicker: "一个特别特别长的话题标签用来测试", title: "这是一个超出十二个字限制的非常长的标题看看会怎样", lede: "这句结论也写得很长很长，用来确认在窄屏幕和宽屏幕上都不会把版面撑破，也不会和旁边的图片重叠在一起。" },
+    { t: "scene", id: "s", layout: "look", tone: "modern", bg: "not-a-colour", accent: "#F5F0A0", kicker: "一个特别特别长的话题标签用来测试", title: "这是一个超出十二个字限制的非常长的标题看看会怎样", lede: "这句结论也写得很长很长，用来确认在窄屏幕和宽屏幕上都不会把版面撑破，也不会和旁边的图片重叠在一起。" },
     { t: "image", id: "hero", kind: "figure", prompt: "x", pending: true },
     { t: "pieces", id: "pieces", items: Array.from({ length: 9 }, (_, i) => ({ id: "p" + i, name: i === 2 ? "一件名字非常非常长的双面羊绒落肩茧型大衣外套" : "单品 " + (i + 1), note: i % 2 ? "" : "备注也可以很长很长很长很长很长很长很长很长很长", hex: i === 4 ? "not-a-colour" : "#7A6A58" })) },
     { t: "facts", id: "facts", items: [{ label: "气温", value: "-12–35°C" }, { label: "场合", value: "通勤 / 约会 / 出差 / 婚礼" }, { label: "预算", value: "¥12,000" }, { label: "件数", value: "9" }] },
@@ -145,7 +156,7 @@ const crowded: Fixture = {
 // The model sometimes offers alternatives inside a single-outfit page.
 const lookWithOptions: Fixture = {
   match: /备选|options/,
-  images: { hero: "/mock/look.jpg", o1: "/mock/look2.jpg", o2: "/mock/alt.jpg" },
+  images: { hero: pic.cobalt, o1: pic.magenta, o2: pic.olive },
   ops: [
     look.ops[0],
     look.ops[1],
@@ -186,7 +197,7 @@ export async function mockTurn(input: string, onEvent: (e: StreamEvent) => void,
   for (const [id, url] of Object.entries(fx.images ?? {})) {
     await sleep(delay, signal);
     delay = 700;
-    onEvent(url ? { event: "image", data: { id, url, ms: ms() } } : { event: "image_error", data: { id } });
+    onEvent(url ? { event: "image", data: { id, ...url, ms: ms() } } : { event: "image_error", data: { id } });
   }
   onEvent({ event: "end", data: { ms: ms() } });
 }

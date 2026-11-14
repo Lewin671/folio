@@ -4,14 +4,14 @@ export type Head = {
   layout: string;
   tone: string;
   bg: string;
-  ink: string;
   accent: string;
   kicker?: string;
   title?: string;
   lede?: string;
 };
 
-export type Img = { url?: string; pending: boolean; failed?: boolean };
+/** `stops` are the picture's backdrop colours, top to bottom, as measured by the server. */
+export type Img = { url?: string; stops?: string[]; pending: boolean; failed?: boolean };
 
 export type Timing = { first?: number; scene?: number; image?: number; end?: number };
 

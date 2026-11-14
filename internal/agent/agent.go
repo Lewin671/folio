@@ -31,12 +31,13 @@ const (
 	imageTimeout  = 75 * time.Second
 )
 
-// Suffixes keep every picture on a clean white backdrop so the page can blend
-// it into the scene colour without background removal.
+// Every picture is shot on a seamless backdrop in the scene colour (%s). The
+// page is then painted in the colour the picture really has, so the figure
+// stands directly on the page without background removal.
 var imageStyle = map[string]struct{ size, suffix string }{
-	"figure":  {"768x1200", "Full-body fashion photograph, whole figure visible from head to shoes with margin, centered. Pure white seamless studio background, soft even light, no cast shadow, no props, no text."},
-	"flatlay": {"960x960", "Flat lay product photograph seen from directly above, items neatly arranged with space between them. Pure white background, soft even light, no text."},
-	"detail":  {"960x960", "Close-up fashion detail photograph, shallow depth of field. Pure white background, soft even light, no text."},
+	"figure":  {"768x1200", "Full-body editorial fashion photograph, whole figure visible from head to shoes, centered, with empty space above the head and at both sides. Seamless studio backdrop and floor in one flat uniform colour: %s. Soft even light, only a faint contact shadow, no props, no text."},
+	"flatlay": {"960x960", "Flat lay photograph seen from directly above, items neatly arranged in the centre with space between them and a clear margin around. Flat uniform backdrop in %s. Soft even light, no text."},
+	"detail":  {"960x960", "Close-up fashion detail photograph, subject centred. Plain out-of-focus studio backdrop in %s. Soft even light, no text."},
 }
 
 type Agent struct {
@@ -122,6 +123,8 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		nOps   int
 		nImgs  int
 		seenID = map[string]bool{}
+		// The scene line sets the backdrop for every picture that follows.
+		sceneBg, sceneBgName string
 	)
 	handle := func(line string) {
 		if a.Debug {
@@ -137,6 +140,10 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			op["id"] = id
 		}
 		seenID[id] = true
+		if op["t"] == "scene" {
+			sceneBg, _ = op["bg"].(string)
+			sceneBgName, _ = op["bgName"].(string)
+		}
 		if nOps == 0 {
 			out.send("first", map[string]any{"ms": since()})
 		}
@@ -163,6 +170,11 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			style = imageStyle["figure"]
 		}
+		bg, bgName := sceneBg, sceneBgName
+		if own, _ := op["bg"].(string); hexRe.MatchString(strings.TrimSpace(own)) {
+			bg = own
+			bgName, _ = op["bgName"].(string)
+		}
 		var refs []string
 		if edit, _ := op["edit"].(bool); edit {
 			if ref := req.Images[id]; validRef(ref) {
@@ -175,9 +187,9 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 			ictx, cancel := context.WithTimeout(ctx, imageTimeout)
 			defer cancel()
 			t0 := time.Now()
-			full := prompt + " " + style.suffix
+			full := prompt + " " + fmt.Sprintf(style.suffix, backdrop(bg, bgName))
 			if len(refs) > 0 {
-				full = prompt + " Keep the pure white background."
+				full = prompt + " Keep the same backdrop colour."
 			}
 			u, err := a.Ark.Image(ictx, a.ImageModel, full, style.size, refs)
 			if err != nil {
@@ -185,7 +197,12 @@ func (a *Agent) HandleTurn(w http.ResponseWriter, r *http.Request) {
 				out.send("image_error", map[string]any{"id": id})
 				return
 			}
-			out.send("image", map[string]any{"id": id, "url": u, "ms": since(), "took_ms": time.Since(t0).Milliseconds()})
+			// A picture without stops still shows, on the colour the model asked for.
+			stops, err := fetchStops(ictx, u)
+			if err != nil {
+				log.Printf("sample %s: %v", id, err)
+			}
+			out.send("image", map[string]any{"id": id, "url": u, "stops": stops, "ms": since(), "took_ms": time.Since(t0).Milliseconds()})
 		}()
 	}
 

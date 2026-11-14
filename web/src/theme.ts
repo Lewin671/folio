@@ -8,7 +8,6 @@ function parse(hex: string | undefined, fallback: RGB): RGB {
 }
 
 const toHex = (c: RGB) => "#" + c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
-const mix = (a: RGB, b: RGB, t: number): RGB => [0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * t) as RGB;
 
 function luminance(c: RGB) {
   const f = (v: number) => {
@@ -24,24 +23,35 @@ const contrast = (a: RGB, b: RGB) => {
 };
 
 const WHITE: RGB = [255, 255, 255];
-const BLACK: RGB = [20, 19, 18];
+
+const DARK: RGB = [22, 20, 18];
 
 /**
- * The model picks the palette, so it cannot be trusted to be readable.
- * Pictures are blended with "multiply", which only works on a light page,
- * so the background is pulled towards white and the other two colours are
- * pushed until they contrast with it.
+ * A scene is a full-bleed colour field, so the model's colour is used as it
+ * is and only the text adapts: light on deep colours, dark on bright ones.
+ * An accent that would vanish into the field falls back to the text colour.
  */
-export function safeTheme(h: { bg?: string; ink?: string; accent?: string }) {
-  let bg = parse(h.bg, [244, 241, 236]);
-  for (let i = 0; i < 12 && luminance(bg) < 0.8; i++) bg = mix(bg, WHITE, 0.25);
-  let ink = parse(h.ink, BLACK);
-  for (let i = 0; i < 12 && contrast(ink, bg) < 9; i++) ink = mix(ink, BLACK, 0.3);
-  let accent = parse(h.accent, [47, 74, 138]);
-  for (let i = 0; i < 12 && contrast(accent, bg) < 3.2; i++) accent = mix(accent, BLACK, 0.15);
-  const onAccent = contrast(accent, WHITE) >= 3 ? "#ffffff" : toHex(BLACK);
-  return { bg: toHex(bg), ink: toHex(ink), accent: toHex(accent), onAccent };
+export function stageTheme(bgHex: string | undefined, accentHex: string | undefined) {
+  const bg = parse(bgHex, [140, 133, 123]);
+  const dark = luminance(bg) < 0.3;
+  const ink = dark ? WHITE : DARK;
+  let accent = parse(accentHex, ink);
+  if (contrast(accent, bg) < 2.2) accent = ink;
+  return { bg: toHex(bg), ink: toHex(ink), accent: toHex(accent), onAccent: inkOn(toHex(accent)), dark };
 }
+
+/**
+ * Page background that continues a picture's own backdrop: the colours read
+ * along its edges, placed at the heights they were read from. `top` and
+ * `height` are CSS lengths describing where the picture sits.
+ */
+export function backdropGradient(stops: string[], top: string, height: string) {
+  const n = stops.length;
+  const at = stops.map((c, i) => `${c} calc(${top} + ${height} * ${((2 * i + 1) / (2 * n)).toFixed(4)})`);
+  return `linear-gradient(180deg, ${at.join(", ")})`;
+}
+
+export const midStop = (stops: string[] | undefined) => (stops?.length ? stops[stops.length >> 1] : undefined);
 
 /** Text colour that stays readable on an arbitrary swatch. */
 export function inkOn(hex: string) {

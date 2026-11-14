@@ -2,8 +2,8 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import type { Head, Img, Op, StreamEvent, Timing, Turn } from "./types";
 import { forHistory, MOCK, runTurn } from "./stream";
-import { safeTheme } from "./theme";
-import { Scene } from "./scene";
+import { backdropGradient, midStop, stageTheme, validHex } from "./theme";
+import { Scene, stageOf } from "./scene";
 
 const SUGGESTIONS = [
   { hint: "一整套", say: "周五面试，想休闲一点" },
@@ -42,7 +42,7 @@ function reducer(s: State, a: Action): State {
     case "finish": {
       // Whatever is still pending when the stream ends will never arrive.
       const images = { ...s.images };
-      for (const [id, img] of Object.entries(images)) if (img.pending) images[id] = { url: img.url, pending: false, failed: true };
+      for (const [id, img] of Object.entries(images)) if (img.pending) images[id] = { ...img, pending: false, failed: true };
       const ok = !a.failed && s.turnOps.length > 0;
       const history = ok ? [...s.history, { user: a.input, ops: forHistory(s.turnOps) }].slice(-3) : s.history;
       return { ...s, busy: false, asking: "", images, history, stale: new Set(), blocks: s.blocks.filter((b) => !s.stale.has(b.id)) };
@@ -60,9 +60,9 @@ function reducer(s: State, a: Action): State {
         case "error":
           return { ...s, error: String(data.message ?? "出错了，请再试一次。") };
         case "image":
-          return { ...s, images: { ...s.images, [data.id]: { url: data.url, pending: false } }, timing: { ...s.timing, image: data.ms } };
+          return { ...s, images: { ...s.images, [data.id]: { url: data.url, stops: Array.isArray(data.stops) ? data.stops.filter(validHex) : undefined, pending: false } }, timing: { ...s.timing, image: data.ms } };
         case "image_error":
-          return { ...s, images: { ...s.images, [data.id]: { url: s.images[data.id]?.url, pending: false, failed: true } } };
+          return { ...s, images: { ...s.images, [data.id]: { ...s.images[data.id], pending: false, failed: true } } };
         case "op":
           return applyOp(s, data as Op);
         default:
@@ -97,33 +97,52 @@ function applyOp(s: State, op: Op): State {
   const images = { ...s.images };
   if (op.t === "image" || op.t === "option") {
     const prev = images[op.id];
-    if (op.pending) images[op.id] = { url: op.edit ? prev?.url : undefined, pending: true };
+    if (op.pending) images[op.id] = op.edit && prev?.url ? { ...prev, failed: false, pending: true } : { pending: true };
     else if (!op.keep || !prev) images[op.id] = prev && !op.prompt ? prev : { pending: false, failed: true };
   }
   return { ...s, turnOps, asking: "", stale, blocks: [...fresh, op, ...old], images };
 }
 
+const HOME_FIELD = "radial-gradient(90% 70% at 50% 108%, #4a3a2e 0%, #1d1815 46%, #0d0c0b 100%)";
+
+/** Resolves once the browser has the picture, so it can appear together with its colour field. */
+const preload = (url: string) =>
+  new Promise<void>((resolve) => {
+    const im = new Image();
+    im.onload = im.onerror = () => resolve();
+    im.src = url;
+  });
+
 export function App() {
   const [s, dispatch] = useReducer(reducer, initial);
   const [draft, setDraft] = useState("");
-  const [showTiming, setShowTiming] = useState(true);
+  const [showTiming, setShowTiming] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const state = useRef(s);
   state.current = s;
 
-  const theme = useMemo(() => safeTheme(s.head ?? {}), [s.head]);
+  const stage = useMemo(() => (s.head ? stageOf(s.head, s.blocks) : null), [s.head, s.blocks]);
+
+  // The field is the scene colour until the main picture arrives; then it
+  // becomes that picture's own backdrop, so the figure stands on the page.
+  const heroStops = stage?.hero ? s.images[stage.hero.id]?.stops : undefined;
+  const flat = !s.head ? "#14110f" : midStop(heroStops) ?? (validHex(s.head.bg) ? s.head.bg.trim() : "#8c857b");
+  const field = !s.head ? HOME_FIELD : heroStops?.length ? backdropGradient(heroStops, "var(--hero-top)", "var(--hero-h)") : flat;
+  const theme = useMemo(() => stageTheme(flat, s.head?.accent), [flat, s.head?.accent]);
   useEffect(() => {
     const root = document.documentElement.style;
-    root.setProperty("--bg", theme.bg);
+    root.setProperty("--flat", theme.bg);
     root.setProperty("--ink", theme.ink);
     root.setProperty("--accent", theme.accent);
     root.setProperty("--on-accent", theme.onAccent);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.bg);
   }, [theme]);
 
   async function say(raw: string) {
     const input = raw.trim();
     if (!input || state.current.busy) return;
     setDraft("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     const cur = state.current;
     const images: Record<string, string> = {};
     for (const [id, img] of Object.entries(cur.images)) if (img.url && /^https:/.test(img.url)) images[id] = img.url;
@@ -131,13 +150,20 @@ export function App() {
     const ctl = new AbortController();
     abort.current = ctl;
     let failed = false;
+    const loading: Promise<void>[] = [];
+    const onEvent = (e: StreamEvent) => {
+      if (e.event === "image" && typeof e.data?.url === "string") {
+        loading.push(preload(e.data.url).then(() => void (ctl.signal.aborted || dispatch({ type: "event", e }))));
+      } else dispatch({ type: "event", e });
+    };
     try {
-      await runTurn({ input, history: cur.history, images }, (e) => dispatch({ type: "event", e }), ctl.signal);
+      await runTurn({ input, history: cur.history, images }, onEvent, ctl.signal);
+      await Promise.all(loading);
     } catch (err) {
       failed = true;
       if (!ctl.signal.aborted) dispatch({ type: "event", e: { event: "error", data: { message: "连接断了，请再试一次。" } } });
     }
-    dispatch({ type: "finish", input, failed });
+    if (!ctl.signal.aborted) dispatch({ type: "finish", input, failed });
   }
 
   function reset() {
@@ -145,14 +171,18 @@ export function App() {
     dispatch({ type: "reset" });
   }
 
-  const actions = s.blocks.find((b) => b.t === "actions" && !s.stale.has(b.id));
-  const chips: { label: string; say: string }[] = (Array.isArray(actions?.items) ? actions!.items : [])
-    .filter((x: any) => x && typeof x.label === "string" && x.label.trim())
-    .slice(0, 3);
   const waitingFirst = s.busy && !!s.asking;
+  const heroClass = stage?.hero ? (stage.square ? "hero-square" : "hero-figure") : "";
 
   return (
-    <div className={`app ${s.busy ? "is-busy" : ""}`}>
+    <div className={`app ${s.busy ? "is-busy" : ""} ${waitingFirst ? "is-thinking" : ""} ${s.head ? "" : "is-home"} ${theme.dark ? "on-dark" : "on-light"} ${heroClass} ${stage ? "tpl-" + stage.tpl : ""}`}>
+      <div className="field" aria-hidden>
+        <AnimatePresence>
+          <motion.div key={field} className="field-layer" style={{ background: field }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0.999 }} transition={{ duration: 1.1, ease: "easeInOut" }} />
+        </AnimatePresence>
+      </div>
+      <div className="glow" aria-hidden />
+
       <nav className="top">
         <button type="button" className="brand" onClick={reset} title="回到开始">
           Atelier
@@ -170,24 +200,28 @@ export function App() {
       <LayoutGroup>
         <AnimatePresence mode="wait">
           {waitingFirst && !s.head ? (
-            <motion.div key="asking" className="asking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div key="asking" className="asking" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.6 }}>
               <p>{s.asking}</p>
             </motion.div>
-          ) : s.head ? (
-            <motion.div key="scene" className={waitingFirst ? "scene-wrap is-waiting" : "scene-wrap"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Scene head={s.head} blocks={s.blocks} images={s.images} stale={s.stale} onSay={say} />
+          ) : s.head && stage ? (
+            <motion.div key={"scene-" + stage.tpl} className={waitingFirst ? "scene-wrap is-waiting" : "scene-wrap"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.5 }}>
+              <Scene head={s.head} stage={stage} images={s.images} stale={s.stale} busy={s.busy} onSay={say} />
             </motion.div>
           ) : (
-            <motion.div key="home" className="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <h1>今天穿什么</h1>
+            <motion.div key="home" className="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.25 } }} transition={{ duration: 0.8 }}>
+              <h1>
+                今天，
+                <br />
+                穿成什么样
+              </h1>
               <ul>
-                {SUGGESTIONS.map((x) => (
-                  <li key={x.say}>
+                {SUGGESTIONS.map((x, i) => (
+                  <motion.li key={x.say} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 + i * 0.07, ease: [0.22, 1, 0.36, 1] }}>
                     <button type="button" onClick={() => say(x.say)}>
                       <span className="hint">{x.hint}</span>
-                      {x.say}
+                      <span className="say">{x.say}</span>
                     </button>
-                  </li>
+                  </motion.li>
                 ))}
               </ul>
             </motion.div>
@@ -201,15 +235,6 @@ export function App() {
             {s.error}
           </p>
         )}
-        {!s.busy && chips.length > 0 && (
-          <div className="chips">
-            {chips.map((c) => (
-              <button type="button" key={c.label} onClick={() => say(c.say || c.label)}>
-                {c.label}
-              </button>
-            ))}
-          </div>
-        )}
         <form
           className="composer"
           onSubmit={(e) => {
@@ -221,7 +246,7 @@ export function App() {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={s.busy ? (s.asking ? "正在排版…" : "正在出图…") : s.head ? "接着说，比如“换成更正式的”" : "要去哪、做什么，直接说"}
+            placeholder={s.busy ? (s.asking ? "正在排这一页…" : "正在出图…") : s.head ? "接着说，比如“换成更正式的”" : "要去哪、做什么，直接说"}
             maxLength={400}
             aria-label="输入你的问题"
             autoFocus

@@ -8,13 +8,15 @@ typeface, with pictures generated to match.
 ## How it works
 
 1. The text model writes one JSON object per line: a `scene` header (layout,
-   tone, three colours, title) followed by content blocks. The full vocabulary
+   tone, stage colour, title) followed by content blocks. The full vocabulary
    is in `internal/agent/prompt.md`.
 2. The Go server forwards every complete line to the browser over SSE as it
    arrives, and starts an image generation for each block carrying a prompt.
-3. The React client renders blocks as they land. Pictures are generated on a
-   white backdrop and blended into the page colour with `mix-blend-mode:
-   multiply`, so no background removal is needed.
+3. Every scene is a full-screen colour field. Pictures are shot on a seamless
+   studio backdrop in the scene colour; the server then reads the colour along
+   the picture's edges (`internal/agent/sample.go`) and the page is painted
+   with those colours at the same heights, so the figure stands directly on
+   the page. No background removal is involved.
 4. On a follow-up the model re-emits the page reusing block ids; the client
    morphs matching blocks in place. An image block with `"edit": true` is
    regenerated from the previous picture, which keeps the person consistent.
