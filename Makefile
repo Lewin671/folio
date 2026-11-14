@@ -1,0 +1,18 @@
+.PHONY: web build test dev imac
+
+web:
+	cd web && pnpm install --frozen-lockfile && pnpm build
+
+build: web
+	go build -o atelier .
+
+test: web
+	go vet ./... && go test ./...
+
+# Front-end with hot reload; expects the server on 127.0.0.1:8787.
+dev:
+	cd web && pnpm dev
+
+# Single binary for an Intel Mac, with the front-end embedded.
+imac: web
+	GOOS=darwin GOARCH=amd64 go build -o dist-bin/atelier-darwin-amd64 .
