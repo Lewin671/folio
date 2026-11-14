@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"atelier/internal/ark"
-	"atelier/internal/profile"
+	"github.com/Lewin671/folio/internal/ark"
+	"github.com/Lewin671/folio/internal/profile"
 )
 
 const visionTimeout = 40 * time.Second

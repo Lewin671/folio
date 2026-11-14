@@ -2,7 +2,7 @@
 .env
 data
 dist-bin
-atelier
+folio
 web/node_modules
 web/dist
 *.log

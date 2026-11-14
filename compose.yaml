@@ -1,12 +1,12 @@
 # docker compose up -d   then open http://localhost:8787
 services:
-  atelier:
+  folio:
     build:
       context: .
       args:
         # In mainland China: NPM_REGISTRY=https://registry.npmmirror.com docker compose build
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
-    image: atelier
+    image: folio
     restart: unless-stopped
     env_file: .env
     ports:
@@ -14,7 +14,7 @@ services:
       # network (BIND=0.0.0.0) lets anyone there see and change the profile.
       - "${BIND:-127.0.0.1}:${PORT:-8787}:8787"
     volumes:
-      - atelier-data:/data
+      - folio-data:/data
 
 volumes:
-  atelier-data:
+  folio-data:

@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"os"
 
-	"atelier/internal/agent"
-	"atelier/internal/ark"
-	"atelier/internal/profile"
+	"github.com/Lewin671/folio/internal/agent"
+	"github.com/Lewin671/folio/internal/ark"
+	"github.com/Lewin671/folio/internal/profile"
 )
 
 //go:embed all:web/dist

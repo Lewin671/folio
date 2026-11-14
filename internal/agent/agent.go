@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"atelier/internal/ark"
-	"atelier/internal/profile"
+	"github.com/Lewin671/folio/internal/ark"
+	"github.com/Lewin671/folio/internal/profile"
 )
 
 //go:embed prompt.md
